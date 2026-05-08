@@ -1,0 +1,52 @@
+# Para Delphi / RAD Studio:
+# Archivos de respaldo y recuperación locales
+__history/
+__recovery/
+
+# Archivos compilados intermedios
+*.dcu
+*.local
+*.identcache
+*.stat
+*.tvsconfig
+
+# Binarios y ejecutables (Cada quien los compila en su máquina)
+*.exe
+*.dll
+*.bpl
+*.bpi
+*.dcp
+*.so
+*.apk
+*.dres
+
+
+# Para Java:
+# Archivos compilados 
+*.class
+
+# Empaquetados
+*.jar
+*.war
+*.ear
+
+# Directorios de compilación (si usan Maven o Gradle)
+target/
+build/
+.gradle/
+
+
+# Generales (Sistemas Operativos e IDEs):
+# Archivos ocultos del sistema
+.DS_Store
+Thumbs.db
+
+# Configuraciones locales de editores (opcional)
+.vscode/
+.idea/
+*.suo
+*.user
+
+
+# EXTRAS
+ImgTableros/
