@@ -6,7 +6,20 @@ uses
   uMain in 'uMain.pas' {frmMain},
   uTypes in 'src\uTypes.pas',
   uDatabase in 'src\uDatabase.pas',
-  uBoardManager in 'src\uBoardManager.pas';
+  uBoardManager in 'src\uBoardManager.pas',
+  uDiceForm in 'src\uDiceForm.pas',
+  uBoardSelectForm in 'src\uBoardSelectForm.pas',
+  uAvatarSelectForm in 'src\uAvatarSelectForm.pas',
+  uRulesForm in 'src\uRulesForm.pas',
+  uConfigForm in 'src\uConfigForm.pas',
+  uGameEngine in 'src\uGameEngine.pas',
+  uTurnManager in 'src\uTurnManager.pas',
+  uPlayerManager in 'src\uPlayerManager.pas',
+  uRulesEngine in 'src\uRulesEngine.pas',
+  uBotAI in 'src\uBotAI.pas',
+  uSaveManager in 'src\uSaveManager.pas',
+  uNetworkManager in 'src\uNetworkManager.pas',
+  uBluetoothManager in 'src\uBluetoothManager.pas';
 
 {$R *.res}
 

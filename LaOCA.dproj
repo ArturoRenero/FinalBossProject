@@ -196,6 +196,7 @@
         <DCC_DcuOutput>R:\$(Platform)\$(Config)</DCC_DcuOutput>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Locale>1033</VerInfo_Locale>
+        <DCC_UnitSearchPath>$(BDSLIB)\$(PLATFORM)\release;.\src;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
         <AppDPIAwarenessMode>PerMonitorV2</AppDPIAwarenessMode>
@@ -223,6 +224,19 @@
         <DCCReference Include="src\uTypes.pas"/>
         <DCCReference Include="src\uDatabase.pas"/>
         <DCCReference Include="src\uBoardManager.pas"/>
+        <DCCReference Include="src\uDiceForm.pas"/>
+        <DCCReference Include="src\uBoardSelectForm.pas"/>
+        <DCCReference Include="src\uAvatarSelectForm.pas"/>
+        <DCCReference Include="src\uRulesForm.pas"/>
+        <DCCReference Include="src\uConfigForm.pas"/>
+        <DCCReference Include="src\uGameEngine.pas"/>
+        <DCCReference Include="src\uTurnManager.pas"/>
+        <DCCReference Include="src\uPlayerManager.pas"/>
+        <DCCReference Include="src\uRulesEngine.pas"/>
+        <DCCReference Include="src\uBotAI.pas"/>
+        <DCCReference Include="src\uSaveManager.pas"/>
+        <DCCReference Include="src\uNetworkManager.pas"/>
+        <DCCReference Include="src\uBluetoothManager.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
