@@ -4,14 +4,26 @@ unit uTypes;
 
 interface
 
+uses
+  System.Types;   // TPointF
+
+type
+  TBoardCells     = TArray<TPointF>;      // coordenadas de las casillas de 1 tablero
+  TAllBoardCoords = TArray<TBoardCells>;  // todos los tableros (dinámico)
+
 const
  MAX_PLAYERS = 4;
- TOTAL_CELLS = 63;
- WINNING_CELL = 63;
+ TOTAL_CELLS = 63; // TODO: Cambiar dependiendo del tablero
+ WINNING_CELL = 63; // TODO: Cambiar dependiendo del tablero
  BOT_THINK_DELAY_MS = 1500; // Esto se usara para simular la "espera" que le tomaria a un humano tirar los dados
+
+ const
+  BLANK_IDX  = 0;   // índice 0 = blank en la ImageList
+  MAX_CELLS  = 63;  // TODO: casillas del juego de la oca
 
 implementation
 
+end.
 
 type
     TPlayerType = (ptHuman, ptBot); TPlayer = record ID : Integer; // 1..4
@@ -33,7 +45,5 @@ type
     TGameState = record BoardIndex : Integer; ActiveTurn : Integer; // ID del jugador activo
     Players : array[0..3] of TPlayer; TotalPlayers : Integer; GameActive : Boolean;
   end;
-
-
 
 end.
