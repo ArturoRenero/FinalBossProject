@@ -44,6 +44,9 @@ type
 
 implementation
 
+uses
+  FireDAC.DApt;   // ← registra TFDQuery y otros componentes DApt en runtime
+
 constructor TDatabase.Create(const DBPath: string);
 begin
   inherited Create;

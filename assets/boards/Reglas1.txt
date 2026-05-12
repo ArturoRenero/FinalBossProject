@@ -1,8 +1,0 @@
-1. Oca, en las casillas 5, 9, 14, 18, 23, 27, 32, 36, 41, 45, 50, 54 y 59. Se avanza a la siguiente oca y se vuelve a tirar (de oca a oca y tiro porque me toca).
-2. Puentes, en las casillas 6 y 12. Se avanza o retrocede al otro puente y se vuelve a tirar (de puente a puente y tiro porque me lleva la corriente).
-3. Posada, en casilla 19. Se pierde un turno.
-4. Pozo, en casilla 31. Se pierden dos turnos.
-5. Laberinto, en casilla 42. Se retrocede a la casilla 30.
-6. Cárcel, en casilla 56. Se pierden tres turnos.
-7. Dados, en casillas 26 y 53. Se avanza o retrocede a la otra casilla de dados y se vuelve a tirar (de dado a dado y tiro porque me ha tocado).
-8. Calavera, en casilla 58. Se vuelve a empezar desde la casilla 1.

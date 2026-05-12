@@ -217,7 +217,7 @@
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
-        <DCCReference Include="uMain.pas">
+        <DCCReference Include="fMain.pas">
             <Form>frmMain</Form>
             <FormType>fmx</FormType>
         </DCCReference>
@@ -227,7 +227,7 @@
         <DCCReference Include="src\uDiceForm.pas"/>
         <DCCReference Include="src\uBoardSelectForm.pas"/>
         <DCCReference Include="src\uAvatarSelectForm.pas"/>
-        <DCCReference Include="src\uRulesForm.pas"/>
+        <DCCReference Include="src\fRulesForm.pas"/>
         <DCCReference Include="src\uConfigForm.pas"/>
         <DCCReference Include="src\uGameEngine.pas"/>
         <DCCReference Include="src\uTurnManager.pas"/>
