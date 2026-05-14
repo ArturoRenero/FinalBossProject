@@ -48,5 +48,5 @@ Thumbs.db
 *.user
 
 
-# EXTRAS
-ImgTableros/
+# Unwanted Folders
+Extras/ 
