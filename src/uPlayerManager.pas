@@ -96,6 +96,7 @@ type
     procedure   LoadAvatarIntoImage(AvatarIdx: Integer; TargetImg: TImage);
     function    SelectRandomAvatar: Integer;
     procedure   MarkAvatarTaken(AvatarIdx: Integer);
+    function GetTakenArray: TArray<Boolean>;
   end;
 
 implementation
@@ -143,6 +144,16 @@ end;
 procedure TPlayerManager.MarkAvatarTaken(AvatarIdx: Integer);
 begin
   FAvailableAvatars.Remove(AvatarIdx);
+end;
+
+function TPlayerManager.GetTakenArray: TArray<Boolean>;
+var i : Integer;
+begin
+  SetLength(Result, FAvatarImages.Count);
+  // Asumir todos tomados; desmarcar los que aún están disponibles
+  for i := 0 to High(Result) do Result[i] := True;
+  for i := 0 to FAvailableAvatars.Count - 1 do
+    Result[FAvailableAvatars[i]] := False;
 end;
 
 end.

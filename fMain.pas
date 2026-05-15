@@ -26,7 +26,8 @@ uses
   uTypes,           // ← MAX_CELLS, BLANK_IDX, TBoardCells, TAllBoardCoords
   uDatabase,        // ← TDatabase
   uBoardManager,
-  uPlayerManager;
+  uPlayerManager,
+  fAvatarSelectForm;
 
 type
   TfrmMain = class(TForm)
@@ -45,6 +46,7 @@ type
     btnChangeBoard: TButton;
     lytButtons: TLayout;
     rctngl1: TRectangle;
+    btnAvatarSelector: TButton;
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure btnCapturarClick(Sender: TObject);
@@ -53,6 +55,8 @@ type
     procedure btnChangeBoardClick(Sender: TObject);
     procedure imgBoardMouseMove(Sender: TObject; Shift: TShiftState; X,
       Y: Single);
+    procedure AbrirSeleccionAvatar(const NombreJugador: string);
+    procedure btnAvatarSelectorClick(Sender: TObject);
   private
     { Private declarations }
     FIndex: Integer; // <-- Declarada aquí para que persista. La 'F' es convención de Delphi para 'Fields' (Campos).
@@ -65,12 +69,24 @@ type
 
     FDemoCell    : Integer;   // casilla actual de la demo
     FDB          : TDatabase; // referencia a la base de datos
+
+    procedure ResetAvatarsToStart;
   public
     { Public declarations }
   end;
 
 var
   frmMain: TfrmMain;
+
+const
+  // Offsets para separar visualmente los 4 avatares en la casilla inicial
+  // Forman un cuadrado de ~40px con el avatar de 128x128 como referencia
+  AVATAR_START_OFFSET : array[0..3] of TPointF = (
+    (X:  0;  Y:  0),   // Player 1 — esquina superior izquierda
+    (X: 40;  Y:  0),   // Player 2 — esquina superior derecha
+    (X:  0;  Y: 40),   // Player 3 — esquina inferior izquierda
+    (X: 40;  Y: 40)    // Player 4 — esquina inferior derecha
+  );
 
 implementation
 
@@ -109,6 +125,11 @@ begin
                            [FDemoCell, pt.X, pt.Y]);
 end;
 
+procedure TfrmMain.btnAvatarSelectorClick(Sender: TObject);
+begin
+  AbrirSeleccionAvatar('Player 1');
+end;
+
 procedure TfrmMain.btnCapturarClick(Sender: TObject);
 begin
   if FIndex = BLANK_IDX then
@@ -124,16 +145,21 @@ end;
 procedure TfrmMain.btnChangeBoardClick(Sender: TObject);
 begin
   // Metodo para cambiar los boards
-  // 1. Usar el valor actual de FIndex (empieza en 0 por defecto al crear el formulario)
-  SetImageByIndex(ilBoards, imgBoard, FIndex);
-  ShowMessage('valor del index: ' + IntToStr(FIndex));
+  // 1. Cargar la imagen del tablero actual
+  FBoardManager.LoadBoardIntoImage(FIndex, imgBoard);
 
-  // 2. Incrementar para el próximo clic
+  // 2. Notificar al BoardManager cuál es el tablero activo ANTES de incrementar
+  FBoardManager.SetActiveBoard(FIndex);
+
+  // 3. Resetear el demo al cambiar de tablero
+  FDemoCell := 0;
+
+  // 4. Avanzar al siguiente índice
   Inc(FIndex);
+  if FIndex >= ilBoards.Count then FIndex := 0;
 
-  // 3. Reiniciar a 0 si llegamos al límite (asumiendo que tienes imágenes 0, 1 y 2)
-  if FIndex >= 4 then
-    FIndex := 0;
+  // 5. Colocar avatares en casilla 0 del nuevo tablero
+  ResetAvatarsToStart;
 end;
 
 procedure TfrmMain.FormCreate(Sender: TObject);
@@ -203,6 +229,64 @@ begin
 // Atrapamos las coordenadas exactas del mouse justo antes del click/doble click
   FLastX := X;
   FLastY := Y;
+end;
+
+procedure TfrmMain.ResetAvatarsToStart;
+var
+  basePos : TPointF;
+  avatars : array[0..3] of TImage;
+  i       : Integer;
+begin
+  // Si el tablero activo no tiene coordenadas, ocultar avatares y salir
+  if not FBoardManager.ActiveBoardHasCoords then
+  begin
+    imgAvatar1.Visible := False;
+    imgAvatar2.Visible := False;
+    imgAvatar3.Visible := False;
+    imgAvatar4.Visible := False;
+    Exit;
+  end;
+
+  // Posición base = casilla 0 del tablero activo (tu coordenada de inicio)
+  basePos := FBoardManager.GetCellPosition(0);
+
+  avatars[0] := imgAvatar1;
+  avatars[1] := imgAvatar2;
+  avatars[2] := imgAvatar3;
+  avatars[3] := imgAvatar4;
+
+  for i := 0 to 3 do
+  begin
+    avatars[i].Width      := 128;
+    avatars[i].Height     := 128;
+    avatars[i].Position.X := basePos.X + AVATAR_START_OFFSET[i].X;
+    avatars[i].Position.Y := basePos.Y + AVATAR_START_OFFSET[i].Y;
+    avatars[i].Visible    := True;
+  end;
+end;
+
+procedure TfrmMain.AbrirSeleccionAvatar(const NombreJugador: string);
+var
+  frm : TfrmAvatarSelect;
+  idx : Integer;
+begin
+  frm := TfrmAvatarSelect.CreateForPlayer(
+           Application,
+           ilAvatars,
+           FPlayerManager.GetTakenArray,
+           NombreJugador);
+  try
+    if frm.ShowModal = mrOk then
+    begin
+      idx := frm.SelectedIdx;
+      FPlayerManager.MarkAvatarTaken(idx);
+      // Aquí cargar la imagen del avatar seleccionado en imgAvatar1 (o el que corresponda)
+      FPlayerManager.LoadAvatarIntoImage(idx, imgAvatar1);
+      imgAvatar1.Visible := True;
+    end;
+  finally
+    frm.Free;
+  end;
 end;
 
 end.

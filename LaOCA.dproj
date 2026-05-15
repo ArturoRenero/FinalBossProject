@@ -226,7 +226,6 @@
         <DCCReference Include="src\uBoardManager.pas"/>
         <DCCReference Include="src\uDiceForm.pas"/>
         <DCCReference Include="src\uBoardSelectForm.pas"/>
-        <DCCReference Include="src\uAvatarSelectForm.pas"/>
         <DCCReference Include="src\fRulesForm.pas"/>
         <DCCReference Include="src\uConfigForm.pas"/>
         <DCCReference Include="src\uGameEngine.pas"/>
@@ -237,6 +236,10 @@
         <DCCReference Include="src\uSaveManager.pas"/>
         <DCCReference Include="src\uNetworkManager.pas"/>
         <DCCReference Include="src\uBluetoothManager.pas"/>
+        <DCCReference Include="src\fAvatarSelectForm.pas">
+            <Form>frmAvatarSelect</Form>
+            <FormType>fmx</FormType>
+        </DCCReference>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

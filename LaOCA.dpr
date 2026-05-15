@@ -9,7 +9,6 @@ uses
   uBoardManager in 'src\uBoardManager.pas',
   uDiceForm in 'src\uDiceForm.pas',
   uBoardSelectForm in 'src\uBoardSelectForm.pas',
-  uAvatarSelectForm in 'src\uAvatarSelectForm.pas',
   fRulesForm in 'src\fRulesForm.pas',
   uConfigForm in 'src\uConfigForm.pas',
   uGameEngine in 'src\uGameEngine.pas',
@@ -19,12 +18,14 @@ uses
   uBotAI in 'src\uBotAI.pas',
   uSaveManager in 'src\uSaveManager.pas',
   uNetworkManager in 'src\uNetworkManager.pas',
-  uBluetoothManager in 'src\uBluetoothManager.pas';
+  uBluetoothManager in 'src\uBluetoothManager.pas',
+  fAvatarSelectForm in 'src\fAvatarSelectForm.pas' {frmAvatarSelect};
 
 {$R *.res}
 
 begin
   Application.Initialize;
   Application.CreateForm(TfrmMain, frmMain);
+//  Application.CreateForm(TfrmAvatarSelect, frmAvatarSelect); // Ya se crea el form desde fMain "frm := TfrmAvatarSelect.CreateForPlayer(...)"
   Application.Run;
 end.
