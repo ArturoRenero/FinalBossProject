@@ -19,13 +19,14 @@ uses
   uSaveManager in 'src\uSaveManager.pas',
   uNetworkManager in 'src\uNetworkManager.pas',
   uBluetoothManager in 'src\uBluetoothManager.pas',
-  fAvatarSelectForm in 'src\fAvatarSelectForm.pas' {frmAvatarSelect};
+  fAvatarSelectForm in 'src\fAvatarSelectForm.pas' {frmAvatarSelect},
+  uConfig in 'src\uConfig.pas';
 
 {$R *.res}
 
 begin
   Application.Initialize;
   Application.CreateForm(TfrmMain, frmMain);
-//  Application.CreateForm(TfrmAvatarSelect, frmAvatarSelect); // Ya se crea el form desde fMain "frm := TfrmAvatarSelect.CreateForPlayer(...)"
+  //  Application.CreateForm(TfrmAvatarSelect, frmAvatarSelect); // Ya se crea el form desde fMain "frm := TfrmAvatarSelect.CreateForPlayer(...)"
   Application.Run;
 end.

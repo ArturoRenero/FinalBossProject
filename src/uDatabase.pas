@@ -40,6 +40,12 @@ type
     function  LoadBoardCoords(BoardIdx: Integer): TBoardCells;
     function  HasBoardCoords(BoardIdx: Integer): Boolean;
     function  LoadAllBoardCoords: TAllBoardCoords;
+
+    // Partida guardada (Fase 8 del plan)
+    procedure SaveGame(const StateJSON: string);
+    function  LoadGame: string;           // devuelve '' si no hay partida
+    function  HasSavedGame: Boolean;
+    procedure DeleteSavedGame;
   end;
 
 implementation
@@ -65,12 +71,24 @@ end;
 
 procedure TDatabase.CreateTables;
 begin
+  // Tabla de coordenadas: 1 registro por tablero, coordenadas en JSON
   FConn.ExecSQL(
     'CREATE TABLE IF NOT EXISTS BOARD_COORDS (' +
     '  board_index INTEGER PRIMARY KEY,' +
     '  coords_json TEXT NOT NULL,' +
     '  updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP' +
-    ')');
+    ')'
+  );
+
+  // Tabla de partida guardada: máximo 1 slot (siempre id = 1)
+  // INSERT OR REPLACE garantiza que solo exista 1 registro
+  FConn.ExecSQL(
+    'CREATE TABLE IF NOT EXISTS SAVED_GAME (' +
+    '  id         INTEGER PRIMARY KEY,' +  // siempre será 1
+    '  state_json TEXT NOT NULL,' +
+    '  saved_at   DATETIME DEFAULT CURRENT_TIMESTAMP' +
+    ')'
+  );
 end;
 
 function TDatabase.CoordsToJSON(const Cells: TBoardCells): string;
@@ -195,6 +213,51 @@ begin
   finally
     qry.Free;
   end;
+end;
+
+procedure TDatabase.SaveGame(const StateJSON: string);
+begin
+  // INSERT OR REPLACE con id=1 garantiza slot único (sobreescribe)
+  FConn.ExecSQL(
+    'INSERT OR REPLACE INTO SAVED_GAME (id, state_json, saved_at)' +
+    ' VALUES (1, :json, CURRENT_TIMESTAMP)',
+    [StateJSON]
+  );
+end;
+
+function TDatabase.LoadGame: string;
+var qry: TFDQuery;
+begin
+  Result := '';
+  qry := TFDQuery.Create(nil);
+  try
+    qry.Connection := FConn;
+    qry.SQL.Text   := 'SELECT state_json FROM SAVED_GAME WHERE id = 1';
+    qry.Open;
+    if not qry.Eof then
+      Result := qry.Fields[0].AsString;
+  finally
+    qry.Free;
+  end;
+end;
+
+function TDatabase.HasSavedGame: Boolean;
+var qry: TFDQuery;
+begin
+  qry := TFDQuery.Create(nil);
+  try
+    qry.Connection := FConn;
+    qry.SQL.Text   := 'SELECT COUNT(*) FROM SAVED_GAME WHERE id = 1';
+    qry.Open;
+    Result := qry.Fields[0].AsInteger > 0;
+  finally
+    qry.Free;
+  end;
+end;
+
+procedure TDatabase.DeleteSavedGame;
+begin
+  FConn.ExecSQL('DELETE FROM SAVED_GAME WHERE id = 1');
 end;
 
 end.

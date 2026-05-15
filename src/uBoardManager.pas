@@ -17,29 +17,39 @@ type
   private
     FBoardImages    : TImageList;
     FDB             : TDatabase;
-    FAllCoords      : TAllBoardCoords;  // array de arrays en memoria
+    FAllCoords      : TAllBoardCoords;
     FActiveBoardIdx : Integer;
-    FTempCoords     : TBoardCells;      // coordenadas siendo capturadas ahora
-    FCapturing      : Boolean;          // modo captura activo?
+    FTempCoords     : TBoardCells;
+    FCapturing      : Boolean;
   public
     constructor Create(ABoardImages: TImageList; ADB: TDatabase);
 
-    // Visualización
+    // ── Carga de coordenadas ──────────────────────────────────────
+    // Carga TODOS los tableros desde la BD al array en memoria.
+    // Se llama automáticamente en Create, pero puede llamarse
+    // manualmente para refrescar tras una captura externa.
+    procedure LoadAll;
+
+    // ── Visualización ─────────────────────────────────────────────
     procedure LoadBoardIntoImage(BoardIdx: Integer; TargetImg: TImage);
     procedure SetActiveBoard(BoardIdx: Integer);
 
-    // Captura de coordenadas (modo admin)
+    // ── Captura de coordenadas (modo admin) ───────────────────────
     procedure StartCapture(BoardIdx: Integer);
-    procedure RecordCell(X, Y: Single);  // llamado desde OnDblClick
-    procedure FinishCapture;             // guarda en DB cuando terminan las 63
+    procedure RecordCell(X, Y: Single);
+    procedure FinishCapture;
 
-    // Consulta de posiciones
-    function  GetCellPosition(CellIdx: Integer): TPointF;
-    function  ActiveBoardHasCoords: Boolean;
-    function  CaptureProgress: Integer; // cuántas casillas van
+    // ── Consulta de posiciones ────────────────────────────────────
+    // Versión con tablero explícito (para uso desde el GE o red)
+    function GetCellPosition(BoardIdx, CellIdx: Integer): TPointF; overload;
+    // Versión corta: usa el tablero activo (para la UI)
+    function GetCellPosition(CellIdx: Integer): TPointF; overload;
 
-    property  ActiveBoardIdx : Integer  read FActiveBoardIdx;
-    property  IsCapturing    : Boolean  read FCapturing;
+    function ActiveBoardHasCoords: Boolean;
+    function CaptureProgress: Integer;
+
+    property ActiveBoardIdx : Integer read FActiveBoardIdx;
+    property IsCapturing    : Boolean read FCapturing;
   end;
 
 implementation
@@ -51,10 +61,19 @@ begin
   FDB             := ADB;
   FActiveBoardIdx := BLANK_IDX;
   FCapturing      := False;
+  LoadAll;  // carga al iniciar el juego (F2: "Al iniciar el juego, LoadAll()")
+end;
 
-  // Cargar todas las coordenadas guardadas en memoria al iniciar
+// ── Carga de coordenadas ──────────────────────────────────────────────────────
+
+procedure TBoardManager.LoadAll;
+begin
+  // Lee todos los registros de BOARD_COORDS y los pone en memoria.
+  // FAllCoords[0] = blank (vacío), FAllCoords[1] = Tablero1, etc.
   FAllCoords := FDB.LoadAllBoardCoords;
 end;
+
+// ── Visualización ─────────────────────────────────────────────────────────────
 
 procedure TBoardManager.LoadBoardIntoImage(BoardIdx: Integer; TargetImg: TImage);
 var
@@ -73,44 +92,60 @@ begin
   FActiveBoardIdx := BoardIdx;
 end;
 
+// ── Captura de coordenadas ────────────────────────────────────────────────────
+
 procedure TBoardManager.StartCapture(BoardIdx: Integer);
 begin
   FActiveBoardIdx := BoardIdx;
-  SetLength(FTempCoords, 0); // limpiar coords temporales
+  SetLength(FTempCoords, 0);
   FCapturing := True;
 end;
 
 procedure TBoardManager.RecordCell(X, Y: Single);
+// Las coordenadas X,Y vienen de OnMouseMove sobre imgBoard,
+// por lo que ya son RELATIVAS al TImage del tablero.
+// Si el tablero se escala en otra pantalla, se escalan proporcionalmente.
 var
   pt : TPointF;
 begin
   if not FCapturing then Exit;
   pt := TPointF.Create(X, Y);
-  FTempCoords := FTempCoords + [pt]; // agregar al array dinámico
+  FTempCoords := FTempCoords + [pt];
 end;
 
 procedure TBoardManager.FinishCapture;
 begin
   if not FCapturing then Exit;
 
-  // Guardar en DB (sobreescribe si ya existía)
+  // Guardar en BD con el índice correcto del tablero activo
   FDB.SaveBoardCoords(FActiveBoardIdx, FTempCoords);
 
-  // Actualizar el array en memoria
+  // Actualizar el array en memoria sin recargar todo desde la BD
   if FActiveBoardIdx >= Length(FAllCoords) then
     SetLength(FAllCoords, FActiveBoardIdx + 1);
 
   FAllCoords[FActiveBoardIdx] := FTempCoords;
+
   FCapturing := False;
   SetLength(FTempCoords, 0);
 end;
 
-function TBoardManager.GetCellPosition(CellIdx: Integer): TPointF;
+// ── Consulta de posiciones ────────────────────────────────────────────────────
+
+function TBoardManager.GetCellPosition(BoardIdx, CellIdx: Integer): TPointF;
+// Versión con tablero explícito — úsala desde el GE o cuando necesites
+// acceder a las coords de un tablero distinto al activo (Ej. comparar, red)
 begin
-  Result := TPointF.Create(0, 0); // default si no hay coords
-  if FActiveBoardIdx >= Length(FAllCoords) then Exit;
-  if CellIdx >= Length(FAllCoords[FActiveBoardIdx]) then Exit;
-  Result := FAllCoords[FActiveBoardIdx][CellIdx];
+  Result := TPointF.Create(0, 0);
+  if BoardIdx >= Length(FAllCoords) then Exit;
+  if CellIdx  >= Length(FAllCoords[BoardIdx]) then Exit;
+  Result := FAllCoords[BoardIdx][CellIdx];
+end;
+
+function TBoardManager.GetCellPosition(CellIdx: Integer): TPointF;
+// Versión corta — delega al tablero activo
+begin
+  Result := GetCellPosition(FActiveBoardIdx, CellIdx);
 end;
 
 function TBoardManager.ActiveBoardHasCoords: Boolean;

@@ -27,7 +27,8 @@ uses
   uDatabase,        // ← TDatabase
   uBoardManager,
   uPlayerManager,
-  fAvatarSelectForm;
+  fAvatarSelectForm,
+  uConfig;
 
 type
   TfrmMain = class(TForm)
@@ -132,14 +133,16 @@ end;
 
 procedure TfrmMain.btnCapturarClick(Sender: TObject);
 begin
-  if FIndex = BLANK_IDX then
+  // FIndex ya fue incrementado por btnChangeBoardClick.
+  // ActiveBoardIdx es la fuente correcta del tablero actualmente visible.
+  if FBoardManager.ActiveBoardIdx = BLANK_IDX then
   begin
     ShowMessage('Selecciona un tablero primero');
     Exit;
   end;
-  FBoardManager.StartCapture(FIndex);
-  lblCoords.Text := 'Modo captura: haz doble click en cada casilla (0/' +
-                    IntToStr(MAX_CELLS) + ')';
+  FBoardManager.StartCapture(FBoardManager.ActiveBoardIdx);
+  lblCoords.Text := Format('Modo captura — Tablero %d: doble click en cada casilla (0/%d)',
+                            [FBoardManager.ActiveBoardIdx, MAX_CELLS]);
 end;
 
 procedure TfrmMain.btnChangeBoardClick(Sender: TObject);
@@ -164,31 +167,40 @@ end;
 
 procedure TfrmMain.FormCreate(Sender: TObject);
 var
-  DBPath : string;
-  DataDir : string;
+  i   : Integer;
+  idx : Integer;
+  avatarImgs : array[0..3] of TImage;
 begin
-  // Inicializar la semilla de números aleatorios
   Randomize;
 
-  DataDir := ExtractFilePath(ParamStr(0)) + 'data';
-  // Crear la carpeta si no existe (ForceDirectories crea también subdirectorios)
-  ForceDirectories(DataDir);
+  // Crear directorio de datos si no existe en esta máquina
+  ForceDirectories(ExtractFilePath(DB_PATH));
 
-  // ExtractFilePath(ParamStr(0)) = carpeta donde está el .exe
-  // Al correr desde el IDE = Win32\Debug\ del proyecto
-  DBPath := DataDir + PathDelim + 'goose.db';
-
-  // Le pasa SU ImageList a cada manager
-  FDB            := TDatabase.Create(DBPath);
+  // Inicializar managers (DB_PATH viene de uConfig)
+  FDB            := TDatabase.Create(DB_PATH);
   FBoardManager  := TBoardManager.Create(ilBoards, FDB);
   FPlayerManager := TPlayerManager.Create(ilAvatars);
   FDemoCell      := 0;
 
-// Asignar avatares aleatorios a cada uno de los 4 ImageControls
-  FPlayerManager.LoadAvatarIntoImage(FPlayerManager.SelectRandomAvatar, imgAvatar1);
-  FPlayerManager.LoadAvatarIntoImage(FPlayerManager.SelectRandomAvatar, imgAvatar2);
-  FPlayerManager.LoadAvatarIntoImage(FPlayerManager.SelectRandomAvatar, imgAvatar3);
-  FPlayerManager.LoadAvatarIntoImage(FPlayerManager.SelectRandomAvatar, imgAvatar4);
+  // Asignar avatares aleatorios a los 4 jugadores
+  // (solo para demo — será reemplazado por fAvatarSelectForm)
+  avatarImgs[0] := imgAvatar1;
+  avatarImgs[1] := imgAvatar2;
+  avatarImgs[2] := imgAvatar3;
+  avatarImgs[3] := imgAvatar4;
+
+  for i := 0 to 3 do
+  begin
+    // Verificar que aún hay avatares disponibles antes de seleccionar
+    if FPlayerManager.AvailableCount > 0 then
+    begin
+      idx := FPlayerManager.SelectRandomAvatar;
+      FPlayerManager.LoadAvatarIntoImage(idx, avatarImgs[i]);
+      avatarImgs[i].Visible := True;
+    end
+    else
+      avatarImgs[i].Visible := False;
+  end;
 end;
 
 procedure TfrmMain.FormDestroy(Sender: TObject);

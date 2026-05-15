@@ -240,6 +240,7 @@
             <Form>frmAvatarSelect</Form>
             <FormType>fmx</FormType>
         </DCCReference>
+        <DCCReference Include="src\uConfig.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>

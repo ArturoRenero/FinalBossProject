@@ -56,7 +56,7 @@ uses
 constructor TfrmAvatarSelect.CreateForPlayer(AOwner: TComponent;
   AImages: TImageList; ATaken: TArray<Boolean>; APlayerName: string);
 begin
-  inherited Create(AOwner);
+  inherited CreateNew(AOwner);
   FAvatarImages := AImages;
   FTakenAvatars := ATaken;
   FPlayerName   := APlayerName;
@@ -248,19 +248,26 @@ end;
 
 procedure TfrmAvatarSelect.UpdateSelection(NewIdx: Integer);
 begin
-  // Quitar selección anterior
+  // Evitar re-seleccionar el mismo avatar
+  if FSelectedIdx = NewIdx then Exit;
+
+  // Restaurar TODOS los estados del avatar anteriormente seleccionado
   if FSelectedIdx >= 0 then
   begin
-    FBorderList[FSelectedIdx].Visible := False;
-    FLabelList[FSelectedIdx].Text     := 'Avatar ' + IntToStr(FSelectedIdx + 1);
+    FBorderList[FSelectedIdx].Visible  := False;
+    FOverlayList[FSelectedIdx].Visible := False;
+    FImgList[FSelectedIdx].Opacity     := 1.0;
+    FLabelList[FSelectedIdx].Text      := 'Avatar ' + IntToStr(FSelectedIdx + 1);
     FLabelList[FSelectedIdx].TextSettings.FontColor := TAlphaColorRec.Silver;
   end;
 
   FSelectedIdx := NewIdx;
 
-  // Aplicar selección nueva
-  FBorderList[NewIdx].Visible := True;
-  FLabelList[NewIdx].Text     := '✓ Seleccionado';
+  // Aplicar TODOS los estados del avatar recién seleccionado
+  FBorderList[NewIdx].Visible  := True;
+  FOverlayList[NewIdx].Visible := False;  // nunca mostrar overlay en selección activa
+  FImgList[NewIdx].Opacity     := 1.0;
+  FLabelList[NewIdx].Text      := '✓ Seleccionado';
   FLabelList[NewIdx].TextSettings.FontColor := TAlphaColorRec.Lime;
 
   FBtnConfirm.Enabled := True;
