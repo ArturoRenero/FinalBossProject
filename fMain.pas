@@ -21,14 +21,19 @@ uses
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   FMX.Controls.Presentation, FMX.StdCtrls, FMX.Objects, FMX.Layouts,
   System.ImageList, FMX.ImgList,
+  // DataBase Libs
   FireDAC.Phys.SQLite,
   FireDAC.Phys.SQLiteWrapper.Stat,
+  // External Units
   uTypes,           // ← MAX_CELLS, BLANK_IDX, TBoardCells, TAllBoardCoords
   uDatabase,        // ← TDatabase
   uBoardManager,
   uPlayerManager,
   fAvatarSelectForm,
-  uConfig;
+  uConfig,
+  fConfigForm,
+  uTurnManager,
+  uGameEngine;
 
 type
   TfrmMain = class(TForm)
@@ -42,22 +47,29 @@ type
     imgAvatar2: TImage;
     imgAvatar3: TImage;
     imgAvatar4: TImage;
-    btnAvanzar: TButton;
+    btnTirarDado: TButton;
     btnCapturar: TButton;
     btnChangeBoard: TButton;
     lytButtons: TLayout;
     rctngl1: TRectangle;
     btnAvatarSelector: TButton;
+    btnConfig: TButton;
+    lblTurno: TLabel;
+    lblDado: TLabel;
+    FGameEngine   : TGameEngine;
+    FTotalPlayers : Integer;
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure btnCapturarClick(Sender: TObject);
     procedure imgBoardDblClick(Sender: TObject);
-    procedure btnAvanzarClick(Sender: TObject);
+    procedure btnTirarDadoClick(Sender: TObject);
     procedure btnChangeBoardClick(Sender: TObject);
     procedure imgBoardMouseMove(Sender: TObject; Shift: TShiftState; X,
       Y: Single);
     procedure AbrirSeleccionAvatar(const NombreJugador: string);
     procedure btnAvatarSelectorClick(Sender: TObject);
+    procedure FormResize(Sender: TObject);
+    procedure btnConfigClick(Sender: TObject);
   private
     { Private declarations }
     FIndex: Integer; // <-- Declarada aquí para que persista. La 'F' es convención de Delphi para 'Fields' (Campos).
@@ -72,7 +84,18 @@ type
     FDB          : TDatabase; // referencia a la base de datos
 
     procedure ResetAvatarsToStart;
-  public
+
+    // Helpers
+    function  GetAvatarImage(PlayerID: Integer): TImage;
+    procedure MoveAvatarToCell(PlayerID, CellIdx: Integer);
+
+    // Callbacks del Game Engine → UI
+    procedure GE_OnDiceRolled(PlayerID, DiceValue: Integer);
+    procedure GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);
+    procedure GE_OnTurnChanged(NewPlayerID: Integer);
+    procedure GE_OnGameOver(WinnerID: Integer);
+    procedure btnAvanzarClick(Sender: TObject);
+    public
     { Public declarations }
   end;
 
@@ -102,7 +125,7 @@ begin
 end;
 
 // Botón avance manual — mueve imgAvatar1 casilla por casilla
-procedure TfrmMain.btnAvanzarClick(Sender: TObject);
+procedure TfrmMain.btnAvanzarClick(Sender: TObject); // TODO: Remover este procedure, sera cambiado por btnTirarDadoClick
 var
   pt : TPointF;
 begin
@@ -115,7 +138,7 @@ begin
   Inc(FDemoCell);
   if FDemoCell >= MAX_CELLS then FDemoCell := 0;
 
-  pt := FBoardManager.GetCellPosition(FDemoCell);
+  pt := FBoardManager.GetCellPosition(FDemoCell, imgBoard.Width, imgBoard.Height);
 
   // Mover avatar 1 a la casilla
   imgAvatar1.Position.X := pt.X;
@@ -140,7 +163,11 @@ begin
     ShowMessage('Selecciona un tablero primero');
     Exit;
   end;
-  FBoardManager.StartCapture(FBoardManager.ActiveBoardIdx);
+  FBoardManager.StartCapture(
+    FBoardManager.ActiveBoardIdx,
+    imgBoard.Width,    // ← dimensiones actuales del imgBoard
+    imgBoard.Height
+  );
   lblCoords.Text := Format('Modo captura — Tablero %d: doble click en cada casilla (0/%d)',
                             [FBoardManager.ActiveBoardIdx, MAX_CELLS]);
 end;
@@ -163,6 +190,51 @@ begin
 
   // 5. Colocar avatares en casilla 0 del nuevo tablero
   ResetAvatarsToStart;
+
+  // Iniciar o reiniciar el juego al cambiar tablero
+  if FBoardManager.ActiveBoardHasCoords
+  then
+    begin
+      // GE_OnTurnChanged se dispara automáticamente desde StartGame
+      FGameEngine.StartGame;
+    end
+  else lblTurno.Text := 'Tablero sin coordenadas definidas';
+end;
+
+procedure TfrmMain.btnConfigClick(Sender: TObject);
+var
+  frm : TfrmConfig;
+begin
+  if FBoardManager.ActiveBoardIdx = BLANK_IDX then
+  begin
+    ShowMessage('Selecciona un tablero antes de abrir la configuración');
+    Exit;
+  end;
+
+  frm := TfrmConfig.CreateForBoard(
+           Application,
+           FBoardManager,
+           FBoardManager.ActiveBoardIdx);
+  try
+    frm.ShowModal;
+    // Al cerrar: recargar coords en memoria por si se guardaron nuevas
+    FBoardManager.LoadAll;
+    ResetAvatarsToStart;
+  finally
+    frm.Free;
+  end;
+end;
+
+procedure TfrmMain.btnTirarDadoClick(Sender: TObject);
+begin
+  if not FGameEngine.GameActive then
+  begin
+    ShowMessage('La partida no ha iniciado. Selecciona un tablero primero.');
+    Exit;
+  end;
+  // Tirar dado para el jugador activo.
+  // El GE ignora el input si no es su turno (guard interno).
+  FGameEngine.TryRollDice(FGameEngine.GetCurrentPlayer);
 end;
 
 procedure TfrmMain.FormCreate(Sender: TObject);
@@ -181,6 +253,14 @@ begin
   FBoardManager  := TBoardManager.Create(ilBoards, FDB);
   FPlayerManager := TPlayerManager.Create(ilAvatars);
   FDemoCell      := 0;
+  FTotalPlayers  := 2;   // TODO: F3: 2 jugadores locales (configurable en F4)
+
+  // Inicializar Game Engine y conectar callbacks
+  FGameEngine := TGameEngine.Create(FTotalPlayers);
+  FGameEngine.OnDiceRolled  := GE_OnDiceRolled;
+  FGameEngine.OnPlayerMoved := GE_OnPlayerMoved;
+  FGameEngine.OnTurnChanged := GE_OnTurnChanged;
+  FGameEngine.OnGameOver    := GE_OnGameOver;
 
   // Asignar avatares aleatorios a los 4 jugadores
   // (solo para demo — será reemplazado por fAvatarSelectForm)
@@ -201,13 +281,62 @@ begin
     else
       avatarImgs[i].Visible := False;
   end;
+
+  lblTurno.Text := 'Selecciona un tablero para iniciar';
 end;
 
 procedure TfrmMain.FormDestroy(Sender: TObject);
 begin
+  FGameEngine.Free;
   FBoardManager.Free;
   FPlayerManager.Free;
   FDB.Free;
+end;
+
+procedure TfrmMain.FormResize(Sender: TObject);
+begin
+  // Reposicionar avatares usando las nuevas dimensiones del imgBoard
+  if FBoardManager.ActiveBoardHasCoords
+  then ResetAvatarsToStart;
+  // TODO Fase 5: reposicionar cada jugador en su casilla actual
+end;
+
+function TfrmMain.GetAvatarImage(PlayerID: Integer): TImage;
+begin
+  case PlayerID of
+    1: Result := imgAvatar1;
+    2: Result := imgAvatar2;
+    3: Result := imgAvatar3;
+    4: Result := imgAvatar4;
+  else
+    Result := imgAvatar1;
+  end;
+end;
+
+// ── Callbacks del Game Engine ─────────────────────────────────────────────────
+procedure TfrmMain.GE_OnDiceRolled(PlayerID, DiceValue: Integer);
+const
+  DICE_CHARS: array[1..6] of string = ('Cara1','Cara2','Cara3','Cara4','Cara5','Cara6');
+begin
+  lblDado.Text := Format('Jugador %d tiró: %s (%d)',
+                          [PlayerID, DICE_CHARS[DiceValue], DiceValue]);
+end;
+
+procedure TfrmMain.GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);
+begin
+  MoveAvatarToCell(PlayerID, NewCellIdx);
+end;
+
+procedure TfrmMain.GE_OnTurnChanged(NewPlayerID: Integer);
+begin
+  lblTurno.Text := Format('Turno: Jugador %d', [NewPlayerID]);
+end;
+
+procedure TfrmMain.GE_OnGameOver(WinnerID: Integer);
+begin
+  lblTurno.Text := Format('🏆 ¡Jugador %d ganó!', [WinnerID]);
+  lblDado.Text  := '— Partida terminada —';
+  ShowMessage(Format('¡Jugador %d ganó la partida!', [WinnerID]));
 end;
 
 // DblClick — graba casilla si está en modo captura
@@ -243,34 +372,45 @@ begin
   FLastY := Y;
 end;
 
+procedure TfrmMain.MoveAvatarToCell(PlayerID, CellIdx: Integer);
+var
+  pt  : TPointF;
+  img : TImage;
+begin
+  pt  := FBoardManager.GetCellPosition(CellIdx, imgBoard.Width, imgBoard.Height);
+  img := GetAvatarImage(PlayerID);
+  img.Position.X := pt.X;
+  img.Position.Y := pt.Y;
+  img.Visible    := True;
+end;
+
 procedure TfrmMain.ResetAvatarsToStart;
 var
   basePos : TPointF;
   avatars : array[0..3] of TImage;
   i       : Integer;
 begin
-  // Si el tablero activo no tiene coordenadas, ocultar avatares y salir
-  if not FBoardManager.ActiveBoardHasCoords then
-  begin
-    imgAvatar1.Visible := False;
-    imgAvatar2.Visible := False;
-    imgAvatar3.Visible := False;
-    imgAvatar4.Visible := False;
-    Exit;
-  end;
-
-  // Posición base = casilla 0 del tablero activo (tu coordenada de inicio)
-  basePos := FBoardManager.GetCellPosition(0);
-
+  // Definir el array PRIMERO para poder usarlo en el Exit temprano
   avatars[0] := imgAvatar1;
   avatars[1] := imgAvatar2;
   avatars[2] := imgAvatar3;
   avatars[3] := imgAvatar4;
 
+  // Si el tablero activo no tiene coordenadas, ocultar avatares y salir
+  if not FBoardManager.ActiveBoardHasCoords then
+  begin
+    for i := 0 to 3 do
+      avatars[i].Visible := False;   // ← usar el array, no set literal
+    Exit;
+  end;
+
+  // Posición base = casilla 0 del tablero activo (tu coordenada de inicio)
+  basePos := FBoardManager.GetCellPosition(0, imgBoard.Width, imgBoard.Height);
+
   for i := 0 to 3 do
   begin
-    avatars[i].Width      := 128;
-    avatars[i].Height     := 128;
+    avatars[i].Width      := 64;
+    avatars[i].Height     := 64;
     avatars[i].Position.X := basePos.X + AVATAR_START_OFFSET[i].X;
     avatars[i].Position.Y := basePos.Y + AVATAR_START_OFFSET[i].Y;
     avatars[i].Visible    := True;

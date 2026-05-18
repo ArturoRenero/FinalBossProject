@@ -224,10 +224,10 @@
         <DCCReference Include="src\uTypes.pas"/>
         <DCCReference Include="src\uDatabase.pas"/>
         <DCCReference Include="src\uBoardManager.pas"/>
-        <DCCReference Include="src\uDiceForm.pas"/>
-        <DCCReference Include="src\uBoardSelectForm.pas"/>
+        <DCCReference Include="src\fDiceForm.pas"/>
+        <DCCReference Include="src\fBoardSelectForm.pas"/>
         <DCCReference Include="src\fRulesForm.pas"/>
-        <DCCReference Include="src\uConfigForm.pas"/>
+        <DCCReference Include="src\fConfigForm.pas"/>
         <DCCReference Include="src\uGameEngine.pas"/>
         <DCCReference Include="src\uTurnManager.pas"/>
         <DCCReference Include="src\uPlayerManager.pas"/>
