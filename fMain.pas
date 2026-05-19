@@ -37,6 +37,7 @@ uses
 
 type
   TfrmMain = class(TForm)
+    // ── Componentes del diseñador (published) ────────────────────
     ilBoards: TImageList;
     lytBoard: TLayout;
     imgBoard: TImage;
@@ -56,45 +57,45 @@ type
     btnConfig: TButton;
     lblTurno: TLabel;
     lblDado: TLabel;
-    FGameEngine   : TGameEngine;
-    FTotalPlayers : Integer;
+    // ── Event handlers (published) ───────────────────────────────
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure btnCapturarClick(Sender: TObject);
     procedure imgBoardDblClick(Sender: TObject);
     procedure btnTirarDadoClick(Sender: TObject);
     procedure btnChangeBoardClick(Sender: TObject);
-    procedure imgBoardMouseMove(Sender: TObject; Shift: TShiftState; X,
-      Y: Single);
+    procedure imgBoardMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Single);
     procedure AbrirSeleccionAvatar(const NombreJugador: string);
     procedure btnAvatarSelectorClick(Sender: TObject);
     procedure FormResize(Sender: TObject);
     procedure btnConfigClick(Sender: TObject);
   private
     { Private declarations }
+    // ── Campos de estado ─────────────────────────────────────────
     FIndex: Integer; // <-- Declarada aquí para que persista. La 'F' es convención de Delphi para 'Fields' (Campos).
     FLastX  : Single;   // ← última posición X del mouse sobre el tablero
     FLastY  : Single;   // ← última posición Y del mouse sobre el tablero
     FCurrentCell : Integer;  // ← índice de la casilla que se está definiendo
+    FDemoCell    : Integer;   // casilla actual de la demo
+    FTotalPlayers : Integer;
 
+    // ── Managers ─────────────────────────────────────────────────
+    FDB          : TDatabase; // referencia a la base de datos
     FBoardManager  : TBoardManager;
     FPlayerManager : TPlayerManager;
+    FGameEngine   : TGameEngine;
 
-    FDemoCell    : Integer;   // casilla actual de la demo
-    FDB          : TDatabase; // referencia a la base de datos
 
-    procedure ResetAvatarsToStart;
-
-    // Helpers
+    // ── Helpers ──────────────────────────────────────────────────
     function  GetAvatarImage(PlayerID: Integer): TImage;
     procedure MoveAvatarToCell(PlayerID, CellIdx: Integer);
+    procedure ResetAvatarsToStart;
 
-    // Callbacks del Game Engine → UI
+    // ── Callbacks del Game Engine → UI ───────────────────────────
     procedure GE_OnDiceRolled(PlayerID, DiceValue: Integer);
     procedure GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);
     procedure GE_OnTurnChanged(NewPlayerID: Integer);
     procedure GE_OnGameOver(WinnerID: Integer);
-    procedure btnAvanzarClick(Sender: TObject);
     public
     { Public declarations }
   end;
@@ -116,38 +117,13 @@ implementation
 
 {$R *.fmx}
 
-procedure SetImageByIndex(AImageList: TImageList; AImage: TImage; const Index: Integer);
-var Bmp: TBitmap; Sz: TSizeF;
-begin
-  Sz := TSizeF.Create(AImage.Width, AImage.Height);
-  Bmp := AImageList.Bitmap(Sz, Index);
-  if Bmp <> nil then AImage.Bitmap.Assign(Bmp);
-end;
-
-// Botón avance manual — mueve imgAvatar1 casilla por casilla
-procedure TfrmMain.btnAvanzarClick(Sender: TObject); // TODO: Remover este procedure, sera cambiado por btnTirarDadoClick
-var
-  pt : TPointF;
-begin
-  if not FBoardManager.ActiveBoardHasCoords then
-  begin
-    ShowMessage('Este tablero no tiene coordenadas definidas aún');
-    Exit;
-  end;
-
-  Inc(FDemoCell);
-  if FDemoCell >= MAX_CELLS then FDemoCell := 0;
-
-  pt := FBoardManager.GetCellPosition(FDemoCell, imgBoard.Width, imgBoard.Height);
-
-  // Mover avatar 1 a la casilla
-  imgAvatar1.Position.X := pt.X;
-  imgAvatar1.Position.Y := pt.Y;
-  imgAvatar1.Visible    := True;
-
-  lblCoords.Text := Format('Avatar en casilla %d  →  X:%.1f  Y:%.1f',
-                           [FDemoCell, pt.X, pt.Y]);
-end;
+//procedure SetImageByIndex(AImageList: TImageList; AImage: TImage; const Index: Integer);
+//var Bmp: TBitmap; Sz: TSizeF;
+//begin
+//  Sz := TSizeF.Create(AImage.Width, AImage.Height);
+//  Bmp := AImageList.Bitmap(Sz, Index);
+//  if Bmp <> nil then AImage.Bitmap.Assign(Bmp);
+//end;
 
 procedure TfrmMain.btnAvatarSelectorClick(Sender: TObject);
 begin
@@ -269,17 +245,21 @@ begin
   avatarImgs[2] := imgAvatar3;
   avatarImgs[3] := imgAvatar4;
 
+
+
   for i := 0 to 3 do
   begin
-    // Verificar que aún hay avatares disponibles antes de seleccionar
-    if FPlayerManager.AvailableCount > 0 then
+    if i < FTotalPlayers then   // ← solo los jugadores activos
     begin
-      idx := FPlayerManager.SelectRandomAvatar;
-      FPlayerManager.LoadAvatarIntoImage(idx, avatarImgs[i]);
+      if FPlayerManager.AvailableCount > 0 then // Verificar que aún hay avatares disponibles antes de seleccionar
+      begin
+        idx := FPlayerManager.SelectRandomAvatar;
+        FPlayerManager.LoadAvatarIntoImage(idx, avatarImgs[i]);
+      end;
       avatarImgs[i].Visible := True;
     end
     else
-      avatarImgs[i].Visible := False;
+      avatarImgs[i].Visible := False;  // ← ocultar slots sin jugador
   end;
 
   lblTurno.Text := 'Selecciona un tablero para iniciar';
@@ -409,11 +389,16 @@ begin
 
   for i := 0 to 3 do
   begin
-    avatars[i].Width      := 64;
-    avatars[i].Height     := 64;
-    avatars[i].Position.X := basePos.X + AVATAR_START_OFFSET[i].X;
-    avatars[i].Position.Y := basePos.Y + AVATAR_START_OFFSET[i].Y;
-    avatars[i].Visible    := True;
+    if i < FTotalPlayers then   // ← solo jugadores activos
+    begin
+      avatars[i].Width      := 64;
+      avatars[i].Height     := 64;
+      avatars[i].Position.X := basePos.X + AVATAR_START_OFFSET[i].X;
+      avatars[i].Position.Y := basePos.Y + AVATAR_START_OFFSET[i].Y;
+      avatars[i].Visible    := True;
+    end
+    else
+      avatars[i].Visible := False;  // ← ocultar slots vacíos
   end;
 end;
 
