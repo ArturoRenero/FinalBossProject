@@ -196,6 +196,7 @@
         <DCC_DcuOutput>R:\$(Platform)\$(Config)</DCC_DcuOutput>
         <VerInfo_IncludeVerInfo>true</VerInfo_IncludeVerInfo>
         <VerInfo_Locale>1033</VerInfo_Locale>
+        <DCC_UnitSearchPath>$(BDSLIB)\$(PLATFORM)\release;.\src;$(DCC_UnitSearchPath)</DCC_UnitSearchPath>
     </PropertyGroup>
     <PropertyGroup Condition="'$(Cfg_1_Win64)'!=''">
         <AppDPIAwarenessMode>PerMonitorV2</AppDPIAwarenessMode>
@@ -216,10 +217,30 @@
         <DelphiCompile Include="$(MainSource)">
             <MainSource>MainSource</MainSource>
         </DelphiCompile>
-        <DCCReference Include="uMain.pas">
+        <DCCReference Include="fMain.pas">
             <Form>frmMain</Form>
             <FormType>fmx</FormType>
         </DCCReference>
+        <DCCReference Include="src\uTypes.pas"/>
+        <DCCReference Include="src\uDatabase.pas"/>
+        <DCCReference Include="src\uBoardManager.pas"/>
+        <DCCReference Include="src\uDiceForm.pas"/>
+        <DCCReference Include="src\fBoardSelectForm.pas"/>
+        <DCCReference Include="src\fRulesForm.pas"/>
+        <DCCReference Include="src\uConfigForm.pas"/>
+        <DCCReference Include="src\uGameEngine.pas"/>
+        <DCCReference Include="src\uTurnManager.pas"/>
+        <DCCReference Include="src\uPlayerManager.pas"/>
+        <DCCReference Include="src\uRulesEngine.pas"/>
+        <DCCReference Include="src\uBotAI.pas"/>
+        <DCCReference Include="src\uSaveManager.pas"/>
+        <DCCReference Include="src\uNetworkManager.pas"/>
+        <DCCReference Include="src\uBluetoothManager.pas"/>
+        <DCCReference Include="src\fAvatarSelectForm.pas">
+            <Form>frmAvatarSelect</Form>
+            <FormType>fmx</FormType>
+        </DCCReference>
+        <DCCReference Include="src\uConfig.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
@@ -1221,12 +1242,6 @@
             <Platforms>
                 <Platform value="Android">True</Platform>
                 <Platform value="Android64">True</Platform>
-                <Platform value="iOSDevice32">False</Platform>
-                <Platform value="iOSDevice64">False</Platform>
-                <Platform value="iOSSimARM64">False</Platform>
-                <Platform value="OSX32">False</Platform>
-                <Platform value="OSX64">False</Platform>
-                <Platform value="OSXARM64">False</Platform>
                 <Platform value="Win32">True</Platform>
                 <Platform value="Win64">True</Platform>
             </Platforms>

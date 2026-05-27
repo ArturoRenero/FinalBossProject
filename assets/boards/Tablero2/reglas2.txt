@@ -1,0 +1,13 @@
+Reglas del juego :
+
+Este juego utiliza dos dados. Cada jugador debe tener una marca separada para marcar claramente el lugar donde los puntos obtenidos lo han llevado. Los jugadores fijan las multas a pagar por los distintos accidentes y hacen una apuesta.
+Cada uno tira los dados por turno, luego cuenta, en el tablero, tantos cuadrados como puntos trajo y coloca su marca en el último de estos puntos.
+El primero en llegar al número 63 gana el juego y cobra la cantidad de apuestas y multas. Si superas este número, duplicas el punto volviendo sobre tus pasos.
+Cualquier jugador cuyos dados caigan en uno de los gansos colocados 9 por 9, duplica su punto hasta que no encuentre más.
+Si de la primera tirada de dados, sacamos 9, por 6 y 3 nos colocaremos en el n° 26, o por 5 y 4 en 53. Si de la primera tirada de dados, sacamos 6, donde hay un puente, nos colocaremos en el número 12.
+Accidentes: quien llegue al No. 19, Inn, paga la multa y se queda allí hasta que los otros jugadores hayan jugado dos veces cada uno.
+El que llega al número 31, donde hay un pozo, paga la multa y se queda allí hasta que otro jugador, llegando al mismo número, lo saca: entonces ocupa el lugar que acaba de dejar este jugador.
+El que llega al No. 42, laberinto, paga la multa y vuelve al No. 30.
+El que llega al número 52, la prisión, paga la multa y se queda allí hasta que otro lo saca; luego toma el lugar ocupado por este último jugador.
+El que llega a la muerte en el número 58 paga la multa y reinicia el juego.
+Cualquier jugador que se encuentre con otro paga la multa y ocupa el lugar que acaba de dejar este último.
