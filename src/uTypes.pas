@@ -1,57 +1,61 @@
-unit uTypes;
+﻿unit uTypes;
 
-// Unit de tipos compartidos entre todos los m�dulos: TPlayerType (Human/Bot), TGameState, TBoardCoord, TPlayer record, TGameConfig. Importada por todos, no importa nada m�s.
+// Unit de tipos compartidos entre todos los módulos: TPlayerType (Human/Bot),
+// TGameState, TBoardCoord, TPlayer record, TGameConfig.
+// Importada por todos, no importa nada más.
 
 interface
 
 uses
-  System.Types;   // TPointF
+  System.Types;   // ← Necesario para TPointF
 
 type
-  TBoardCells     = TArray<TPointF>;      // coordenadas de las casillas de 1 tablero
-  TAllBoardCoords = TArray<TBoardCells>;  // todos los tableros (din�mico)
+  // ── 1. Tipos de Tablero y Coordenadas ─────────────────────────
+  TBoardCells       = TArray<TPointF>;      // coordenadas de las casillas de 1 tablero
+  TAllBoardCoords   = TArray<TBoardCells>;  // todos los tableros (dinámico)
 
-const
- MAX_PLAYERS = 4;
- TOTAL_CELLS = 63;
- WINNING_CELL = 63;
- BOT_THINK_DELAY_MS = 1500; // Esto se usara para simular la "espera" que le tomaria a un humano tirar los dados
-
- const
-  BLANK_IDX  = 0;   // �ndice 0 = blank en la ImageList
-  MAX_CELLS  = 63;  // TODO: casillas del juego de la oca
-
-implementation
-
-end.
-
-type
-    TPlayerType = (ptHuman, ptBot);
-    TPlayer = record ID : Integer; // 1..4
-    Name : String;
-    PlayerType : TPlayerType;
-    AvatarIndex : Integer; // �ndice en TImageList
-    Position : Integer; // casilla actual (0..63)
-    IsActive : Boolean; // es su turno?
-    IsBlocked : Boolean; // bloqueado por regla (pozo, c�rcel)
-    TurnsToWait : Integer; // turnos que debe esperar bloqueado
-  end;
-
-type
-    TBoardCoord = record CellIndex : Integer;
-    X : Single; // posici�n en el tablero (TPointF)
+  TBoardCoord = record
+    CellIndex : Integer;
+    X : Single; // posición en el tablero (TPointF)
     Y : Single;
   end;
 
-TBoardCoordsArray = TArray<TBoardCoord>;
-TAllBoardCoords = array[0..9] of TBoardCoordsArray; // �ndice 0..9 = hasta 10 tableros distintos
+  TBoardCoordsArray = TArray<TBoardCoord>;
 
-type
-    TGameState = record BoardIndex : Integer;
-    ActiveTurn : Integer; // ID del jugador activo, sera util para jugabilidad remota
-    Players : array[0..3] of TPlayer;
-    TotalPlayers : Integer;
-    GameActive : Boolean;
+  // ── 2. Tipos de Jugador ───────────────────────────────────────
+  TPlayerType = (ptHuman, ptBot);
+
+  TPlayer = record
+    ID          : Integer; // 1..4
+    Name        : String;
+    PlayerType  : TPlayerType;
+    AvatarIndex : Integer; // índice en TImageList
+    Position    : Integer; // casilla actual (0..63)
+    IsActive    : Boolean; // es su turno?
+    IsBlocked   : Boolean; // bloqueado por regla (pozo, cárcel)
+    TurnsToWait : Integer; // turnos que debe esperar bloqueado
   end;
+
+  // ── 3. Tipos de Estado del Juego ──────────────────────────────
+  TGameState = record
+    BoardIndex   : Integer;
+    ActiveTurn   : Integer; // ID del jugador activo, util para jugabilidad remota
+    Players      : array[0..3] of TPlayer;
+    TotalPlayers : Integer;
+    GameActive   : Boolean;
+  end;
+
+const
+  // ── Constantes Globales ───────────────────────────────────────
+  MAX_PLAYERS        = 4;
+  TOTAL_CELLS        = 63;
+  MAX_CELLS          = 63;
+  WINNING_CELL       = 63;
+  BOT_THINK_DELAY_MS = 1500; // "espera" que le tomaría a un humano tirar los dados
+  BLANK_IDX          = 0;    // índice 0 = blank en la ImageList
+
+implementation
+
+// (Aquí no va nada de código por ahora porque uTypes solo declara estructuras de datos)
 
 end.

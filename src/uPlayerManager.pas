@@ -22,8 +22,9 @@ type
     procedure   LoadAvatarIntoImage(AvatarIdx: Integer; TargetImg: TImage);
     function    SelectRandomAvatar: Integer;
     procedure   MarkAvatarTaken(AvatarIdx: Integer);
-    function GetTakenArray: TArray<Boolean>;
-    function AvailableCount: Integer;
+    procedure   ResetTakenAvatars;
+    function    GetTakenArray: TArray<Boolean>;
+    function    AvailableCount: Integer;
   end;
 
 implementation
@@ -35,7 +36,9 @@ begin
   inherited Create;
   FAvatarImages     := AAvatarImages;
   FAvailableAvatars := TList<Integer>.Create;
-  for i := 0 to FAvatarImages.Count - 1 do
+
+  // Iniciamos el ciclo en 1 en lugar de 0 para evitar que el randomizer seleccione la pos 0 que corresponde a BLANK
+  for i := 1 to FAvatarImages.Count - 1 do
     FAvailableAvatars.Add(i);
 end;
 
@@ -71,6 +74,18 @@ end;
 procedure TPlayerManager.MarkAvatarTaken(AvatarIdx: Integer);
 begin
   FAvailableAvatars.Remove(AvatarIdx);
+end;
+
+procedure TPlayerManager.ResetTakenAvatars;
+var
+  i: Integer;
+begin
+  // Vaciamos la lista actual
+  FAvailableAvatars.Clear;
+
+  // Volvemos a insertar todos los índices basándonos en el ImageList
+  for i := 1 to FAvatarImages.Count - 1 do
+    FAvailableAvatars.Add(i);
 end;
 
 function TPlayerManager.GetTakenArray: TArray<Boolean>;

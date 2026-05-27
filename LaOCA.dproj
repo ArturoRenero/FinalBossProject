@@ -225,7 +225,7 @@
         <DCCReference Include="src\uDatabase.pas"/>
         <DCCReference Include="src\uBoardManager.pas"/>
         <DCCReference Include="src\uDiceForm.pas"/>
-        <DCCReference Include="src\uBoardSelectForm.pas"/>
+        <DCCReference Include="src\fBoardSelectForm.pas"/>
         <DCCReference Include="src\fRulesForm.pas"/>
         <DCCReference Include="src\uConfigForm.pas"/>
         <DCCReference Include="src\uGameEngine.pas"/>
