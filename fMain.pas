@@ -23,6 +23,7 @@ uses
   System.ImageList, FMX.ImgList,
   FireDAC.Phys.SQLite,
   FireDAC.Phys.SQLiteWrapper.Stat,
+  FMX.DialogService.Sync,
   uTypes,           // ← MAX_CELLS, BLANK_IDX, TBoardCells, TAllBoardCoords
   uDatabase,        // ← TDatabase
   uBoardManager,
@@ -32,7 +33,9 @@ uses
   uTurnManager,
   uGameEngine,
   fBoardSelectForm,
-  fDiceForm;
+  fDiceForm,
+  fRulesForm,
+  FMX.Ani;
 
 type
   TfrmMain = class(TForm)
@@ -55,6 +58,10 @@ type
     lblDado: TLabel;
     btnStartGame: TButton;
     ilDiceFaces: TImageList;
+    lblEventoEspecial: TLabel;
+    rctnglSpecialEvent: TRectangle;
+    imgWell: TImage;
+    btnRules: TButton;
     // ── Event handlers ────────────────────────────────────────────
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -65,6 +72,7 @@ type
     function SeleccionarAvatar(PlayerID: Integer; const NombreJugador: string): Boolean;
     procedure imgBoardResize(Sender: TObject);
     procedure btnStartGameClick(Sender: TObject);
+    procedure btnRulesClick(Sender: TObject);
   private
     { Private declarations }
     // ── Campos de estado ──────────────────────────────────────────
@@ -88,6 +96,7 @@ type
     procedure GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);
     procedure GE_OnTurnChanged(NewPlayerID: Integer);
     procedure GE_OnGameOver(WinnerID: Integer);
+    procedure GE_OnRuleTriggered(PlayerID: Integer; const RuleType, Message: string);
   public
     { Public declarations }
   end;
@@ -118,13 +127,6 @@ var
 begin
   FIndex := 0;
   Randomize;
-  // TODO: dafajdsfasdf ========================================================
-  {No olvides ir a fMain.pas, declarar el nuevo método que se enlazará a este
-  evento (como lo hicimos con la animación del pozo) y conectarlo en el
-  FormCreate (FGameEngine.OnRuleTriggered := GE_OnRuleTriggered;).
-  ¡Tu juego ya casi tiene mecánicas completas!}
-
-  // TODO: incluir animaciones especiales y el formulario de reglas
 
   // Crear directorio de datos si no existe en esta máquina
   ForceDirectories(ExtractFilePath(DB_PATH));
@@ -142,6 +144,7 @@ begin
   FGameEngine.OnPlayerMoved := GE_OnPlayerMoved;
   FGameEngine.OnTurnChanged := GE_OnTurnChanged;
   FGameEngine.OnGameOver    := GE_OnGameOver;
+  FGameEngine.OnRuleTriggered := GE_OnRuleTriggered;
 
   // Asignar avatares aleatorios a los 4 jugadores
   // (solo para demo — será reemplazado por fAvatarSelectForm)
@@ -251,9 +254,21 @@ begin
 end;
 
 // ── Navegación de tableros ────────────────────────────────────────────────────
+procedure TfrmMain.btnRulesClick(Sender: TObject);
+begin
+  if not Assigned(frmRules) then
+    frmRules := TfrmRules.Create(Application);
+
+  frmRules.CargarReglas(FBoardManager.ActiveBoardIdx);
+
+  // Usamos Show en lugar de ShowModal.
+  // Esto abre la ventana, pero permite seguir jugando en el tablero de fondo.
+  frmRules.Show;
+end;
+
 procedure TfrmMain.btnStartGameClick(Sender: TObject);
 var
-  strPlayers: string;
+  arrInput: TArray<string>;
   numPlayers: Integer;
   i: Integer;
   frmBoard: TfrmBoardSelect; // Variable para nuestro nuevo formulario
@@ -286,15 +301,22 @@ begin
     Exit;
   end;
 
-  // --- 2. CANTIDAD DE JUGADORES ---
-  strPlayers := '2';
-  if not InputQuery('Nueva Partida', '¿Cuántos jugadores? (2-4):', strPlayers) then
+// --- 2. CANTIDAD DE JUGADORES ---
+
+  // Asignamos tamaño al arreglo dinámico y le damos su valor por defecto
+  SetLength(arrInput, 1);
+  arrInput[0] := '2';
+
+  // Usamos la sobrecarga de 3 parámetros. arrInput entra como '2' y sale con la respuesta.
+  if not TDialogServiceSync.InputQuery('Nueva Partida', ['¿Cuántos jugadores? (2-4):'], arrInput) then
   begin
     ShowMessage('Configuración de partida cancelada.');
     Exit;
   end;
 
-  numPlayers := StrToIntDef(strPlayers, 0);
+  // Leemos la respuesta que se guardó en arrInput
+  numPlayers := StrToIntDef(arrInput[0], 0);
+
   if (numPlayers < 2) or (numPlayers > 4) then
   begin
     ShowMessage('La cantidad de jugadores debe ser entre 2 y 4.');
@@ -344,14 +366,21 @@ var
   pt  : TPointF;
   img : TImage;
 begin
-  // GetCellPosition convierte de coordenada normalizada (0..1) a píxeles actuales
   pt  := FBoardManager.GetCellPosition(CellIdx, imgBoard.Width, imgBoard.Height);
   img := GetAvatarImage(PlayerID);
+
   img.Position.X := pt.X;
   img.Position.Y := pt.Y;
-  img.Visible    := True;
-end;
 
+  // ¡RESETEAR PROPIEDADES VISUALES POR SI VENÍAN DE UNA ANIMACIÓN!
+  img.Opacity := 1.0;
+  img.Scale.X := 1.0;
+  img.Scale.Y := 1.0;
+  img.RotationAngle := 0;
+
+  img.Visible    := True;
+  img.BringToFront; // Nos aseguramos de que el pato no quede detrás del tablero
+end;
 procedure TfrmMain.ResetAvatarsToStart;
 var
   basePos : TPointF;
@@ -457,6 +486,87 @@ end;
 procedure TfrmMain.GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);
 begin
   MoveAvatarToCell(PlayerID, NewCellIdx);
+end;
+
+procedure TfrmMain.GE_OnRuleTriggered(PlayerID: Integer; const RuleType, Message: string);
+var
+  imgPlayer: TImage;
+begin
+  imgPlayer := GetAvatarImage(PlayerID);
+  imgPlayer.BringToFront; // Asegurar que la ficha animada esté hasta arriba
+
+  // 1. Mostrar el mensaje flotante que se desvanece
+  lblEventoEspecial.Text := Message;
+  lblEventoEspecial.Opacity := 1.0;
+  rctnglSpecialEvent.Visible := True;
+  lblEventoEspecial.BringToFront;
+  TAnimator.AnimateFloat(lblEventoEspecial, 'Opacity', 0.0, 4.0);
+
+  // ── ANIMACIÓN: EL POZO ──
+  if RuleType = 'WELL' then
+  begin
+    // Validamos que hayas colocado un TImage llamado imgWell en tu UI
+    if Assigned(imgWell) then
+    begin
+      imgWell.Visible := True;
+      imgWell.BringToFront;
+      // imgPlayer.BringToFront; // Descomenta esto si quieres que el pato tape el pozo al caer
+
+      // Movemos al jugador al centro de su propia casilla (simulando caer)
+      TAnimator.AnimateFloat(imgPlayer, 'Position.X', imgPlayer.Position.X + 15, 1.0);
+      TAnimator.AnimateFloat(imgPlayer, 'Position.Y', imgPlayer.Position.Y + 15, 1.0);
+
+      // Gira como un remolino (1080 grados = 3 vueltas)
+      TAnimator.AnimateFloat(imgPlayer, 'RotationAngle', 1080, 2.0);
+
+      // Se hace pequeñito hacia el fondo
+      TAnimator.AnimateFloat(imgPlayer, 'Scale.X', 0.1, 2.0);
+      TAnimator.AnimateFloat(imgPlayer, 'Scale.Y', 0.1, 2.0);
+
+      // Se oscurece hasta desaparecer
+      TAnimator.AnimateFloat(imgPlayer, 'Opacity', 0.0, 2.0);
+    end;
+  end
+
+  // ── ANIMACIÓN: LA MUERTE (CALAVERA) ──
+  else if RuleType = 'DEATH' then
+  begin
+    // 1. Tiembla violently (Electrocución/Susto) en los primeros 0.2 segundos
+    TAnimator.AnimateFloat(imgPlayer, 'Position.X', imgPlayer.Position.X + 15, 0.05);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Position.X', imgPlayer.Position.X - 30, 0.05, 0.05);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Position.X', imgPlayer.Position.X + 15, 0.05, 0.1);
+
+    // 2. Cae al abismo fuera de la pantalla (hacia abajo)
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Position.Y', imgPlayer.Position.Y + 800, 1.0, 0.3);
+
+    // 3. Se desvanece mientras cae
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 0.0, 0.5, 0.3);
+  end
+
+  // ── ANIMACIÓN: DE OCA A OCA ──
+  else if RuleType = 'GOOSE' then
+  begin
+    // El pato da un "salto" inflándose en el aire
+    TAnimator.AnimateFloat(imgPlayer, 'Scale.X', 1.8, 0.3);
+    TAnimator.AnimateFloat(imgPlayer, 'Scale.Y', 1.8, 0.3);
+
+    // Y vuelve a su tamaño normal justo cuando el GameEngine lo teletransporta
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.X', 1.0, 0.3, 0.4);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.Y', 1.0, 0.3, 0.4);
+  end
+
+  // ── ANIMACIÓN: EL LABERINTO ──
+  else if RuleType = 'MAZE' then
+  begin
+    // Gira desorientado 3 vueltas
+    TAnimator.AnimateFloat(imgPlayer, 'RotationAngle', 1080, 1.5);
+
+    // Efecto de parpadeo (se pierde en la niebla)
+    TAnimator.AnimateFloat(imgPlayer, 'Opacity', 0.2, 0.2);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 1.0, 0.2, 0.2);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 0.2, 0.2, 0.4);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 1.0, 0.2, 0.6);
+  end;
 end;
 
 procedure TfrmMain.GE_OnTurnChanged(NewPlayerID: Integer);

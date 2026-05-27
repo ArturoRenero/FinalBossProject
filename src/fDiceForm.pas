@@ -1,7 +1,5 @@
 unit fDiceForm;
 
-// Formulario secundario que muestra la animación GIF del dado girando (TGifImage o TAnimatedImage) y luego el resultado numérico. Se muestra modal durante el turno activo y se cierra automáticamente.
-
 interface
 
 uses
@@ -11,13 +9,15 @@ uses
 
 type
   TfrmDice = class(TForm)
-    imgDice: TImage;
-    tmrAnimation: TTimer;
-    procedure tmrAnimationTimer(Sender: TObject);
   private
+    FImgDice: TImage;
+    FTmrAnimation: TTimer;
+
     FFinalValue: Integer;
     FAnimCount: Integer;
-    FDiceImages: TImageList; // Puedes pasarle una lista con las 6 caras del dado
+    FDiceImages: TImageList;
+
+    procedure tmrAnimationTimer(Sender: TObject);
   public
     constructor CreateWithResult(AOwner: TComponent; AImages: TImageList; AFinalValue: Integer); reintroduce;
   end;
@@ -26,18 +26,33 @@ implementation
 
 constructor TfrmDice.CreateWithResult(AOwner: TComponent; AImages: TImageList; AFinalValue: Integer);
 begin
-  inherited CreateNew(AOwner);
-  // Configura el form (tamaño pequeño, sin bordes, centrado)
-  Width := 200; Height := 200;
+  inherited CreateNew(AOwner); // Evitamos el archivo .fmx intencionalmente
+
+  // 1. Configuración de la ventana transparente
+  Width := 150;
+  Height := 150;
   Position := TFormPosition.ScreenCenter;
   BorderStyle := TFmxFormBorderStyle.None;
+  Transparency := True; // ¡Hace que el fondo sea completamente invisible!
+  Fill.Color := TAlphaColorRec.Null;
 
   FDiceImages := AImages;
   FFinalValue := AFinalValue;
   FAnimCount := 0;
 
-  // Inicia la animación al crearse
-  tmrAnimation.Enabled := True;
+  // 2. Crear el TImage por código
+  FImgDice := TImage.Create(Self);
+  FImgDice.Parent := Self;
+  FImgDice.Align := TAlignLayout.Client;
+  FImgDice.WrapMode := TImageWrapMode.Fit;
+
+  // 3. Crear el TTimer por código
+  FTmrAnimation := TTimer.Create(Self);
+  FTmrAnimation.Interval := 100; // 100 milisegundos = 10 frames por segundo
+  FTmrAnimation.OnTimer := tmrAnimationTimer;
+
+  // ¡Arrancar la animación!
+  FTmrAnimation.Enabled := True;
 end;
 
 procedure TfrmDice.tmrAnimationTimer(Sender: TObject);
@@ -47,27 +62,28 @@ var
 begin
   Inc(FAnimCount);
 
-  Sz.Width := imgDice.Width;
-  Sz.Height := imgDice.Height;
+  // Tamaño recomendado para extraer las imágenes del ImageList
+  Sz.Width := 128;
+  Sz.Height := 128;
 
   if FAnimCount < 15 then
   begin
-    // Animación: Mostrar caras aleatorias
-    randomFace := Random(6);
-    imgDice.Bitmap.Assign(FDiceImages.Bitmap(Sz, randomFace));
+    // Animación: Mostrar caras aleatorias para simular que está girando
+    randomFace := Random(6); // 0 a 5
+    FImgDice.Bitmap.Assign(FDiceImages.Bitmap(Sz, randomFace));
   end
   else if FAnimCount = 15 then
   begin
     // Detenerse en el valor real que dictó el Game Engine
-    // (Asumiendo que el índice 0 es la cara 1, índice 1 es cara 2, etc.)
+    // (Asegúrate de que la cara 1 esté en el índice 0, cara 2 en índice 1, etc.)
     bmpIndex := FFinalValue - 1;
-    imgDice.Bitmap.Assign(FDiceImages.Bitmap(Sz, bmpIndex));
+    FImgDice.Bitmap.Assign(FDiceImages.Bitmap(Sz, bmpIndex));
   end
   else if FAnimCount > 22 then
   begin
-    // Darle al usuario un instante (unos 7 ticks) para ver el resultado antes de cerrar
-    tmrAnimation.Enabled := False;
-    ModalResult := mrOk; // Cierra el form
+    // Darle al usuario un instante para ver el resultado antes de cerrar
+    FTmrAnimation.Enabled := False;
+    ModalResult := mrOk; // Cierra el form y devuelve el control a fMain
   end;
 end;
 

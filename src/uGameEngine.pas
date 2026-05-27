@@ -112,8 +112,8 @@ begin
   if rule.Message <> '' then
   begin
     // Si hay un mensaje, le avisamos a la UI
-    if Assigned(FOnRuleTriggered) then
-      FOnRuleTriggered(PlayerID, 'INFO', rule.Message);
+    if Assigned(FOnRuleTriggered)
+    then FOnRuleTriggered(PlayerID, rule.RuleType, rule.Message);
   end;
 
   if rule.NewCell <> -1 then
