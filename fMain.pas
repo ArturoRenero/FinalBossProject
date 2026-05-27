@@ -31,7 +31,8 @@ uses
   uConfig,
   uTurnManager,
   uGameEngine,
-  fBoardSelectForm;
+  fBoardSelectForm,
+  fDiceForm;
 
 type
   TfrmMain = class(TForm)
@@ -53,6 +54,7 @@ type
     lblTurno: TLabel;
     lblDado: TLabel;
     btnStartGame: TButton;
+    ilDiceFaces: TImageList;
     // ── Event handlers ────────────────────────────────────────────
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -116,6 +118,13 @@ var
 begin
   FIndex := 0;
   Randomize;
+  // TODO: dafajdsfasdf ========================================================
+  {No olvides ir a fMain.pas, declarar el nuevo método que se enlazará a este
+  evento (como lo hicimos con la animación del pozo) y conectarlo en el
+  FormCreate (FGameEngine.OnRuleTriggered := GE_OnRuleTriggered;).
+  ¡Tu juego ya casi tiene mecánicas completas!}
+
+  // TODO: incluir animaciones especiales y el formulario de reglas
 
   // Crear directorio de datos si no existe en esta máquina
   ForceDirectories(ExtractFilePath(DB_PATH));
@@ -428,10 +437,21 @@ begin
 end;
 
 procedure TfrmMain.GE_OnDiceRolled(PlayerID, DiceValue: Integer);
-const
-  DICE_CHARS: array[1..6] of string = ('Face1','Face2','Face3','Face4','Face5','Face6');
+var
+  frmDice: TfrmDice;
 begin
-  lblDado.Text := Format('J%d tiró: %s  (%d)', [PlayerID, DICE_CHARS[DiceValue], DiceValue]);
+  // Creamos el formulario
+  frmDice := TfrmDice.CreateWithResult(Application, ilDiceFaces, DiceValue);
+
+  // ¡El bloque try debe ir acompañado de un begin si abarca más de una línea de código!
+  // Aunque en este caso es una sola línea (frmDice.ShowModal), la convención es ponerlo.
+  try
+    frmDice.ShowModal; // El juego se pausa aquí hasta que la animación termine
+  finally
+    frmDice.Free;
+  end;
+
+  lblDado.Text := Format('J%d tiró: %d', [PlayerID, DiceValue]);
 end;
 
 procedure TfrmMain.GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);

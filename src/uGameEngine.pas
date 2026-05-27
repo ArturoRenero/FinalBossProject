@@ -1,57 +1,54 @@
 ﻿unit uGameEngine;
 
-// Coordinador central. Inicializa y orquesta los sub-módulos. Detecta si hay bots, dispara sus turnos automáticos, y actúa como punto de entrada único para la UI.
-
 interface
 
 uses
   System.SysUtils,
   uTypes,
-  uTurnManager;
+  uTurnManager,
+  uRulesEngine; // <-- ¡NUEVO! Importamos el motor de reglas
 
 type
-  // Callbacks hacia la UI — el GE no conoce componentes FMX
   TOnDiceRolled  = procedure(PlayerID, DiceValue: Integer) of object;
   TOnPlayerMoved = procedure(PlayerID, NewCellIdx: Integer) of object;
   TOnTurnChanged = procedure(NewPlayerID: Integer) of object;
   TOnGameOver    = procedure(WinnerID: Integer) of object;
+  // <-- ¡NUEVO CALLBACK! Para comunicarle a la UI qué pasó
+  TOnRuleTriggered = procedure(PlayerID: Integer; const RuleType, Message: string) of object;
 
   TGameEngine = class
   private
     FTurnManager     : TTurnManager;
     FTotalPlayers    : Integer;
     FGameActive      : Boolean;
-    FPlayerPositions : array[0..3] of Integer;  // posición actual de cada jugador (0-based idx de casilla)
+    FPlayerPositions : array[0..3] of Integer;
 
-    FOnDiceRolled  : TOnDiceRolled;
-    FOnPlayerMoved : TOnPlayerMoved;
-    FOnTurnChanged : TOnTurnChanged;
-    FOnGameOver    : TOnGameOver;
+    FOnDiceRolled    : TOnDiceRolled;
+    FOnPlayerMoved   : TOnPlayerMoved;
+    FOnTurnChanged   : TOnTurnChanged;
+    FOnGameOver      : TOnGameOver;
+    FOnRuleTriggered : TOnRuleTriggered; // <-- Variable interna
 
     function RollDiceValue: Integer;
-
     procedure SetTotalPlayers(Value: Integer);
   public
     constructor Create(ATotalPlayers: Integer);
     destructor  Destroy; override;
 
-    // El jugador activo presiona "Tirar Dado"
-    // Devuelve False si no era el turno de PlayerID (input ignorado)
     function TryRollDice(PlayerID: Integer): Boolean;
-
     procedure StartGame;
     procedure ResetGame;
 
     function GetPlayerPosition(PlayerID: Integer): Integer;
     function GetCurrentPlayer: Integer;
 
-    property TotalPlayers  : Integer        read FTotalPlayers write SetTotalPlayers;
-
-    property GameActive    : Boolean        read FGameActive;
-    property OnDiceRolled  : TOnDiceRolled  read FOnDiceRolled  write FOnDiceRolled;
-    property OnPlayerMoved : TOnPlayerMoved read FOnPlayerMoved write FOnPlayerMoved;
-    property OnTurnChanged : TOnTurnChanged read FOnTurnChanged write FOnTurnChanged;
-    property OnGameOver    : TOnGameOver    read FOnGameOver    write FOnGameOver;
+    property TotalPlayers    : Integer          read FTotalPlayers write SetTotalPlayers;
+    property GameActive      : Boolean          read FGameActive;
+    property OnDiceRolled    : TOnDiceRolled    read FOnDiceRolled    write FOnDiceRolled;
+    property OnPlayerMoved   : TOnPlayerMoved   read FOnPlayerMoved   write FOnPlayerMoved;
+    property OnTurnChanged   : TOnTurnChanged   read FOnTurnChanged   write FOnTurnChanged;
+    property OnGameOver      : TOnGameOver      read FOnGameOver      write FOnGameOver;
+    property OnRuleTriggered : TOnRuleTriggered read FOnRuleTriggered write FOnRuleTriggered; // <-- Exponemos la propiedad
   end;
 
 implementation
@@ -82,13 +79,13 @@ function TGameEngine.TryRollDice(PlayerID: Integer): Boolean;
 var
   diceVal  : Integer;
   newPos   : Integer;
-  pIdx     : Integer;  // índice 0-based del jugador
+  pIdx     : Integer;
+  rule     : TRuleResult; // <-- Variable para guardar el resultado de la evaluación
 begin
   Result := False;
   if not FGameActive then Exit;
 
   // ── Guard de turno ─────────────────────────────────────────────
-  // Si no es el turno de PlayerID, ignorar el input completamente
   if not FTurnManager.IsPlayerTurn(PlayerID) then Exit;
 
   Result := True;
@@ -99,18 +96,43 @@ begin
   if Assigned(FOnDiceRolled) then
     FOnDiceRolled(PlayerID, diceVal);
 
-  // ── Mover jugador ──────────────────────────────────────────────
+  // ── 1er Movimiento ─────────────────────────────────────────────
   newPos := FPlayerPositions[pIdx] + diceVal;
 
-  // Sin reglas aún (F7): si supera el límite, no avanza más allá
-  // del último casillero válido
   if newPos >= MAX_CELLS then
     newPos := MAX_CELLS - 1;
 
   FPlayerPositions[pIdx] := newPos;
-
   if Assigned(FOnPlayerMoved) then
     FOnPlayerMoved(PlayerID, newPos);
+
+  // ── 2do: Evaluar Reglas (¡NUEVO!) ──────────────────────────────
+  rule := TRulesEngine.EvaluateCell(0, newPos); // 0 es el tablero base por ahora
+
+  if rule.Message <> '' then
+  begin
+    // Si hay un mensaje, le avisamos a la UI
+    if Assigned(FOnRuleTriggered) then
+      FOnRuleTriggered(PlayerID, 'INFO', rule.Message);
+  end;
+
+  if rule.NewCell <> -1 then
+  begin
+    // La regla indica que el jugador fue teletransportado (Ej. Puente a Puente)
+    FPlayerPositions[pIdx] := rule.NewCell;
+    newPos := rule.NewCell; // Actualizamos la variable local
+
+    // Volver a avisar a la UI del nuevo movimiento
+    if Assigned(FOnPlayerMoved) then
+      FOnPlayerMoved(PlayerID, newPos);
+  end;
+
+  // Manejo de turnos perdidos por reglas (Ej. Posada, Cárcel)
+  if rule.TurnsToSkip > 0 then
+  begin
+    // Aquí, en el futuro, le dirías a uTurnManager que bloquee al jugador
+    // FTurnManager.BlockPlayer(PlayerID, rule.TurnsToSkip);
+  end;
 
   // ── Verificar victoria ─────────────────────────────────────────
   if newPos >= MAX_CELLS - 1 then
@@ -129,16 +151,10 @@ end;
 
 procedure TGameEngine.SetTotalPlayers(Value: Integer);
 begin
-  // Solo aceptamos valores válidos
   if (Value >= 2) and (Value <= 4) then
   begin
     FTotalPlayers := Value;
-
-    // Si el TurnManager ya existe, lo destruimos y lo recreamos
-    // con la nueva cantidad de jugadores para mantenerlos sincronizados
-    if Assigned(FTurnManager)
-    then FTurnManager.Free;
-
+    if Assigned(FTurnManager) then FTurnManager.Free;
     FTurnManager := TTurnManager.Create(FTotalPlayers);
   end;
 end;
@@ -146,12 +162,10 @@ end;
 procedure TGameEngine.StartGame;
 var i: Integer;
 begin
-  for i := 0 to 3 do
-    FPlayerPositions[i] := 0;
+  for i := 0 to 3 do FPlayerPositions[i] := 0;
   FTurnManager.Reset;
   FGameActive := True;
-  if Assigned(FOnTurnChanged) then
-    FOnTurnChanged(1);
+  if Assigned(FOnTurnChanged) then FOnTurnChanged(1);
 end;
 
 procedure TGameEngine.ResetGame;

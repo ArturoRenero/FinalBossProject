@@ -224,7 +224,6 @@
         <DCCReference Include="src\uTypes.pas"/>
         <DCCReference Include="src\uDatabase.pas"/>
         <DCCReference Include="src\uBoardManager.pas"/>
-        <DCCReference Include="src\uDiceForm.pas"/>
         <DCCReference Include="src\fBoardSelectForm.pas"/>
         <DCCReference Include="src\fRulesForm.pas"/>
         <DCCReference Include="src\uConfigForm.pas"/>
@@ -241,6 +240,7 @@
             <FormType>fmx</FormType>
         </DCCReference>
         <DCCReference Include="src\uConfig.pas"/>
+        <DCCReference Include="src\fDiceForm.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
