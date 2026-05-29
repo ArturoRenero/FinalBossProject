@@ -62,6 +62,7 @@ type
     rctnglSpecialEvent: TRectangle;
     imgWell: TImage;
     btnRules: TButton;
+//    FTmrWalk: TTimer; // Declarado en private
     // ── Event handlers ────────────────────────────────────────────
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -87,6 +88,19 @@ type
     FBoardManager  : TBoardManager;
     FPlayerManager : TPlayerManager;
     FGameEngine    : TGameEngine;
+
+    // Variables para la animación paso a paso
+    FWalkingPlayer: Integer;
+    FWalkTargetCell: Integer;
+    FSecondaryTargetCell: Integer; // Guarda el salto de la Oca/Laberinto
+    FVisualPositions: array[1..4] of Integer; // Dónde está visualmente el pato
+    FTmrWalk: TTimer;
+
+    // Variables para "pausar" la regla hasta que termine de caminar
+    FPendingRuleType: string;
+    FPendingRuleMessage: string;
+    FPendingRulePlayer: Integer;
+
     // ── Métodos privados ──────────────────────────────────────────
     procedure ResetAvatarsToStart;
     function  GetAvatarImage(PlayerID: Integer): TImage;
@@ -97,6 +111,9 @@ type
     procedure GE_OnTurnChanged(NewPlayerID: Integer);
     procedure GE_OnGameOver(WinnerID: Integer);
     procedure GE_OnRuleTriggered(PlayerID: Integer; const RuleType, Message: string);
+
+    procedure tmrWalkTimer(Sender: TObject);
+    procedure EjecutarAnimacionRegla(PlayerID: Integer; const RuleType, Message: string);
   public
     { Public declarations }
   end;
@@ -148,7 +165,7 @@ begin
 
   // Asignar avatares aleatorios a los 4 jugadores
   // (solo para demo — será reemplazado por fAvatarSelectForm)
-  avatarImgs[0] := imgAvatar1;
+  avatarImgs[0] := imgAvatar1; // TODO: comentar las siguiente 4 lineas para probar runtime results
   avatarImgs[1] := imgAvatar2;
   avatarImgs[2] := imgAvatar3;
   avatarImgs[3] := imgAvatar4;
@@ -175,6 +192,12 @@ begin
 
   // Para evitar mal flujo del juego
   btnTirarDado.Enabled := False;
+
+  // -- Inicializar temporizador de caminado --
+  FTmrWalk := TTimer.Create(Self);
+  FTmrWalk.Interval := 250; // 250ms por cada casilla que avanza
+  FTmrWalk.Enabled := False;
+  FTmrWalk.OnTimer := tmrWalkTimer;
 end; // FormCreate()
 
 procedure TfrmMain.FormDestroy(Sender: TObject);
@@ -387,6 +410,8 @@ var
   avatars : array[0..3] of TImage;
   i       : Integer;
 begin
+  for i := 1 to 4 do FVisualPositions[i] := 0; // Reiniciar posiciones visuales
+
   avatars[0] := imgAvatar1;
   avatars[1] := imgAvatar2;
   avatars[2] := imgAvatar3;
@@ -465,6 +490,133 @@ begin
   FGameEngine.TryRollDice(FGameEngine.GetCurrentPlayer);
 end;
 
+procedure TfrmMain.tmrWalkTimer(Sender: TObject);
+var
+  step: Integer;
+  pt: TPointF;
+begin
+  // ¿Ya llegamos a la casilla destino?
+  if FVisualPositions[FWalkingPlayer] = FWalkTargetCell then
+  begin
+    FTmrWalk.Enabled := False;
+
+    // 1. ¿Hay una trampa o regla esperándolo aquí?
+    if FPendingRuleType <> '' then
+    begin
+      EjecutarAnimacionRegla(FWalkingPlayer, FPendingRuleType, FPendingRuleMessage);
+      FPendingRuleType := ''; // Limpiar la memoria
+    end;
+
+    // 2. ¿Hay un salto secundario pendiente? (De Oca a Oca, Laberinto, etc.)
+    if FSecondaryTargetCell <> -1 then
+    begin
+      FWalkTargetCell := FSecondaryTargetCell;
+      FSecondaryTargetCell := -1; // Limpiar
+
+      // Magia: Hacemos una pausa para dejar que la animación de la regla termine
+      // Usamos un hilo anónimo para no congelar tu interfaz
+      TThread.CreateAnonymousThread(procedure
+        begin
+          Sleep(1200); // 1.2 segundos para que el usuario admire el evento
+          TThread.Synchronize(nil, procedure
+            begin
+              FTmrWalk.Enabled := True; // ¡A caminar hacia el destino final!
+            end);
+        end).Start;
+    end;
+
+    Exit;
+  end;
+
+  // Si no hemos llegado, damos 1 paso adelante (o hacia atrás)
+  if FVisualPositions[FWalkingPlayer] < FWalkTargetCell then
+    step := 1
+  else
+    step := -1;
+
+  FVisualPositions[FWalkingPlayer] := FVisualPositions[FWalkingPlayer] + step;
+  pt := FBoardManager.GetCellPosition(FVisualPositions[FWalkingPlayer], imgBoard.Width, imgBoard.Height);
+
+  TAnimator.AnimateFloat(GetAvatarImage(FWalkingPlayer), 'Position.X', pt.X, 0.2);
+  TAnimator.AnimateFloat(GetAvatarImage(FWalkingPlayer), 'Position.Y', pt.Y, 0.2);
+end; // tmrWalkTimer()
+
+procedure TfrmMain.EjecutarAnimacionRegla(PlayerID: Integer; const RuleType, Message: string);
+var
+  imgPlayer: TImage;
+begin
+  imgPlayer := GetAvatarImage(PlayerID);
+  imgPlayer.BringToFront;
+
+  // 1. Mostrar el mensaje flotante arreglado (animamos el rectángulo padre)
+  if Assigned(rctnglSpecialEvent) and Assigned(lblEventoEspecial) then
+  begin
+    lblEventoEspecial.Text := Message;
+    rctnglSpecialEvent.Opacity := 1.0;
+    rctnglSpecialEvent.Visible := True;
+    rctnglSpecialEvent.BringToFront;
+
+    // Animamos la opacidad del rectángulo (se desvanecerá junto con su texto)
+    TAnimator.AnimateFloat(rctnglSpecialEvent, 'Opacity', 0.0, 4.0);
+  end;
+
+// ── ANIMACIÓN: EL POZO ──
+  if RuleType = 'WELL' then
+  begin
+    if Assigned(imgWell) then
+    begin
+      var ptAbs, ptLoc: TPointF;
+
+      // Truco maestro: Obtenemos la posición exacta del pozo en la pantalla (Absoluta)
+      ptAbs := imgWell.LocalToAbsolute(TPointF.Create(0,0));
+      // Y la convertimos al idioma del contenedor donde viven los patos (Local)
+      ptLoc := lytBoard.AbsoluteToLocal(ptAbs);
+
+      // Ahora el pato volará exactamente hacia el pozo sin fallar
+      TAnimator.AnimateFloat(imgPlayer, 'Position.X', ptLoc.X + 20, 1.0);
+      TAnimator.AnimateFloat(imgPlayer, 'Position.Y', ptLoc.Y + 20, 1.0);
+
+      TAnimator.AnimateFloat(imgPlayer, 'RotationAngle', 1080, 2.0);
+      TAnimator.AnimateFloat(imgPlayer, 'Scale.X', 0.1, 2.0);
+      TAnimator.AnimateFloat(imgPlayer, 'Scale.Y', 0.1, 2.0);
+      TAnimator.AnimateFloat(imgPlayer, 'Opacity', 0.0, 2.0);
+    end;
+  end
+
+// ── ANIMACIÓN: LA MUERTE (CALAVERA) ──
+  else if RuleType = 'DEATH' then
+  begin
+    TAnimator.AnimateFloat(imgPlayer, 'Position.X', imgPlayer.Position.X + 15, 0.05);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Position.X', imgPlayer.Position.X - 30, 0.05, 0.05);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Position.X', imgPlayer.Position.X + 15, 0.05, 0.1);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Position.Y', imgPlayer.Position.Y + 800, 1.0, 0.3);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 0.0, 0.5, 0.3);
+
+    // Como regresa al inicio, teletransportamos visualmente su posición interna
+    // para evitar que tenga que caminar 58 casillas hacia atrás.
+    FVisualPositions[PlayerID] := 0;
+  end
+
+  // ── ANIMACIÓN: DE OCA A OCA ──
+  else if RuleType = 'GOOSE' then
+  begin
+    TAnimator.AnimateFloat(imgPlayer, 'Scale.X', 1.8, 0.3);
+    TAnimator.AnimateFloat(imgPlayer, 'Scale.Y', 1.8, 0.3);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.X', 1.0, 0.3, 0.4);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.Y', 1.0, 0.3, 0.4);
+  end
+
+  // ── ANIMACIÓN: EL LABERINTO ──
+  else if RuleType = 'MAZE' then
+  begin
+    TAnimator.AnimateFloat(imgPlayer, 'RotationAngle', 1080, 1.5);
+    TAnimator.AnimateFloat(imgPlayer, 'Opacity', 0.2, 0.2);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 1.0, 0.2, 0.2);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 0.2, 0.2, 0.4);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 1.0, 0.2, 0.6);
+  end;
+end; // EjecutarAnimacionRegla()
+
 procedure TfrmMain.GE_OnDiceRolled(PlayerID, DiceValue: Integer);
 var
   frmDice: TfrmDice;
@@ -484,89 +636,41 @@ begin
 end;
 
 procedure TfrmMain.GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);
+var
+  img: TImage;
 begin
-  MoveAvatarToCell(PlayerID, NewCellIdx);
-end;
+  // ¡EL ANTÍDOTO CONTRA FANTASMAS!
+  // Restauramos al pato a su estado original ANTES de que empiece a caminar
+  img := GetAvatarImage(PlayerID);
+  img.Opacity := 1.0;
+  img.Scale.X := 1.0;
+  img.Scale.Y := 1.0;
+  img.RotationAngle := 0;
+  img.Visible := True;
+  img.BringToFront;
+
+  if not FTmrWalk.Enabled then
+  begin
+    // Es el movimiento normal de los dados
+    FWalkingPlayer := PlayerID;
+    FWalkTargetCell := NewCellIdx;
+    FSecondaryTargetCell := -1;
+    FTmrWalk.Enabled := True;
+  end
+  else
+  begin
+    // El motor ya calculó el salto extra, lo guardamos para después
+    FSecondaryTargetCell := NewCellIdx;
+  end;
+end; // GE_OnPlayerMoved()
 
 procedure TfrmMain.GE_OnRuleTriggered(PlayerID: Integer; const RuleType, Message: string);
-var
-  imgPlayer: TImage;
 begin
-  imgPlayer := GetAvatarImage(PlayerID);
-  imgPlayer.BringToFront; // Asegurar que la ficha animada esté hasta arriba
-
-  // 1. Mostrar el mensaje flotante que se desvanece
-  lblEventoEspecial.Text := Message;
-  lblEventoEspecial.Opacity := 1.0;
-  rctnglSpecialEvent.Visible := True;
-  lblEventoEspecial.BringToFront;
-  TAnimator.AnimateFloat(lblEventoEspecial, 'Opacity', 0.0, 4.0);
-
-  // ── ANIMACIÓN: EL POZO ──
-  if RuleType = 'WELL' then
-  begin
-    // Validamos que hayas colocado un TImage llamado imgWell en tu UI
-    if Assigned(imgWell) then
-    begin
-      imgWell.Visible := True;
-      imgWell.BringToFront;
-      // imgPlayer.BringToFront; // Descomenta esto si quieres que el pato tape el pozo al caer
-
-      // Movemos al jugador al centro de su propia casilla (simulando caer)
-      TAnimator.AnimateFloat(imgPlayer, 'Position.X', imgPlayer.Position.X + 15, 1.0);
-      TAnimator.AnimateFloat(imgPlayer, 'Position.Y', imgPlayer.Position.Y + 15, 1.0);
-
-      // Gira como un remolino (1080 grados = 3 vueltas)
-      TAnimator.AnimateFloat(imgPlayer, 'RotationAngle', 1080, 2.0);
-
-      // Se hace pequeñito hacia el fondo
-      TAnimator.AnimateFloat(imgPlayer, 'Scale.X', 0.1, 2.0);
-      TAnimator.AnimateFloat(imgPlayer, 'Scale.Y', 0.1, 2.0);
-
-      // Se oscurece hasta desaparecer
-      TAnimator.AnimateFloat(imgPlayer, 'Opacity', 0.0, 2.0);
-    end;
-  end
-
-  // ── ANIMACIÓN: LA MUERTE (CALAVERA) ──
-  else if RuleType = 'DEATH' then
-  begin
-    // 1. Tiembla violently (Electrocución/Susto) en los primeros 0.2 segundos
-    TAnimator.AnimateFloat(imgPlayer, 'Position.X', imgPlayer.Position.X + 15, 0.05);
-    TAnimator.AnimateFloatDelay(imgPlayer, 'Position.X', imgPlayer.Position.X - 30, 0.05, 0.05);
-    TAnimator.AnimateFloatDelay(imgPlayer, 'Position.X', imgPlayer.Position.X + 15, 0.05, 0.1);
-
-    // 2. Cae al abismo fuera de la pantalla (hacia abajo)
-    TAnimator.AnimateFloatDelay(imgPlayer, 'Position.Y', imgPlayer.Position.Y + 800, 1.0, 0.3);
-
-    // 3. Se desvanece mientras cae
-    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 0.0, 0.5, 0.3);
-  end
-
-  // ── ANIMACIÓN: DE OCA A OCA ──
-  else if RuleType = 'GOOSE' then
-  begin
-    // El pato da un "salto" inflándose en el aire
-    TAnimator.AnimateFloat(imgPlayer, 'Scale.X', 1.8, 0.3);
-    TAnimator.AnimateFloat(imgPlayer, 'Scale.Y', 1.8, 0.3);
-
-    // Y vuelve a su tamaño normal justo cuando el GameEngine lo teletransporta
-    TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.X', 1.0, 0.3, 0.4);
-    TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.Y', 1.0, 0.3, 0.4);
-  end
-
-  // ── ANIMACIÓN: EL LABERINTO ──
-  else if RuleType = 'MAZE' then
-  begin
-    // Gira desorientado 3 vueltas
-    TAnimator.AnimateFloat(imgPlayer, 'RotationAngle', 1080, 1.5);
-
-    // Efecto de parpadeo (se pierde en la niebla)
-    TAnimator.AnimateFloat(imgPlayer, 'Opacity', 0.2, 0.2);
-    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 1.0, 0.2, 0.2);
-    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 0.2, 0.2, 0.4);
-    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 1.0, 0.2, 0.6);
-  end;
+  // El motor nos manda una regla, pero el pato apenas va a empezar a caminar.
+  // Guardamos la regla en memoria para ejecutarla después.
+  FPendingRulePlayer := PlayerID;
+  FPendingRuleType := RuleType;
+  FPendingRuleMessage := Message;
 end;
 
 procedure TfrmMain.GE_OnTurnChanged(NewPlayerID: Integer);

@@ -41,6 +41,7 @@ begin
     31: // El Pozo
       begin
         Result.RuleType := 'WELL';
+        Result.TurnsToSkip := 999; // 999 = Atrapado hasta ser rescatado
         Result.Message := '¡Caíste al pozo! Necesitas rescate.';
       end;
     42: // El Laberinto
