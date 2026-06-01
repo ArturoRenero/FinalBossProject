@@ -1,9 +1,11 @@
 object frmMain: TfrmMain
   Left = 0
   Top = 0
+  BorderIcons = [biSystemMenu]
   Caption = 'Form1'
-  ClientHeight = 420
-  ClientWidth = 616
+  ClientHeight = 500
+  ClientWidth = 744
+  WindowState = wsMaximized
   FormFactor.Width = 320
   FormFactor.Height = 480
   FormFactor.Devices = [Desktop]
@@ -12,8 +14,8 @@ object frmMain: TfrmMain
   DesignerMasterStyle = 0
   object lytBoard: TLayout
     Align = Client
-    Size.Width = 479.000000000000000000
-    Size.Height = 398.000000000000000000
+    Size.Width = 607.000000000000000000
+    Size.Height = 478.000000000000000000
     Size.PlatformDefault = False
     TabOrder = 1
     object imgBoard: TImage
@@ -23,8 +25,8 @@ object frmMain: TfrmMain
         item
         end>
       Align = Client
-      Size.Width = 357.000000000000000000
-      Size.Height = 398.000000000000000000
+      Size.Width = 607.000000000000000000
+      Size.Height = 478.000000000000000000
       Size.PlatformDefault = False
       WrapMode = Stretch
       OnDblClick = imgBoardDblClick
@@ -53938,19 +53940,20 @@ object frmMain: TfrmMain
             'l.png'
         end>
       Align = Right
-      Position.X = 357.000000000000000000
+      Position.X = 485.000000000000000000
       Size.Width = 122.000000000000000000
-      Size.Height = 398.000000000000000000
+      Size.Height = 478.000000000000000000
       Size.PlatformDefault = False
+      Visible = False
     end
   end
   object lytButtons: TLayout
     Align = Left
     Size.Width = 137.000000000000000000
-    Size.Height = 398.000000000000000000
+    Size.Height = 478.000000000000000000
     Size.PlatformDefault = False
-    TabOrder = 7
-    object rctngl1: TRectangle
+    TabOrder = 6
+    object rctnglSidebar: TRectangle
       Align = Client
       Fill.Color = xFFFFAE1D
       Padding.Left = 5.000000000000000000
@@ -53958,7 +53961,7 @@ object frmMain: TfrmMain
       Padding.Right = 5.000000000000000000
       Padding.Bottom = 5.000000000000000000
       Size.Width = 137.000000000000000000
-      Size.Height = 398.000000000000000000
+      Size.Height = 478.000000000000000000
       Size.PlatformDefault = False
       object btnTirarDado: TButton
         Align = Top
@@ -53990,7 +53993,7 @@ object frmMain: TfrmMain
         Align = Bottom
         StyledSettings = [Family, FontColor]
         Position.X = 5.000000000000000000
-        Position.Y = 343.000000000000000000
+        Position.Y = 423.000000000000000000
         Size.Width = 127.000000000000000000
         Size.Height = 50.000000000000000000
         Size.PlatformDefault = False
@@ -54003,7 +54006,7 @@ object frmMain: TfrmMain
         Align = Bottom
         StyledSettings = [Family, FontColor]
         Position.X = 5.000000000000000000
-        Position.Y = 293.000000000000000000
+        Position.Y = 373.000000000000000000
         Size.Width = 127.000000000000000000
         Size.Height = 50.000000000000000000
         Size.PlatformDefault = False
@@ -54038,27 +54041,40 @@ object frmMain: TfrmMain
         TextSettings.Trimming = None
         OnClick = btnRulesClick
       end
-    end
-  end
-  object stat1: TStatusBar
-    Position.Y = 398.000000000000000000
-    ShowSizeGrip = True
-    Size.Width = 616.000000000000000000
-    Size.Height = 22.000000000000000000
-    Size.PlatformDefault = False
-    TabOrder = 3
-    object lblCoords: TLabel
-      Align = Client
-      Size.Width = 616.000000000000000000
-      Size.Height = 22.000000000000000000
-      Size.PlatformDefault = False
-      Text = 'lblCoords'
-      TabOrder = 0
+      object lblCasilla: TLabel
+        Align = Bottom
+        StyledSettings = [Family, FontColor]
+        Position.X = 5.000000000000000000
+        Position.Y = 323.000000000000000000
+        Size.Width = 127.000000000000000000
+        Size.Height = 50.000000000000000000
+        Size.PlatformDefault = False
+        TextSettings.Font.Size = 15.000000000000000000
+        TextSettings.Font.StyleExt = {00070000000000000004000000}
+        Text = 'Casilla: --'
+        TabOrder = 10
+      end
     end
   end
   object FTmrWalk: TTimer
     Left = 553
     Top = 344
+  end
+  object stat1: TStatusBar
+    Position.Y = 478.000000000000000000
+    ShowSizeGrip = True
+    Size.Width = 744.000000000000000000
+    Size.Height = 22.000000000000000000
+    Size.PlatformDefault = False
+    TabOrder = 11
+    object lblCoords: TLabel
+      Align = Client
+      Size.Width = 744.000000000000000000
+      Size.Height = 22.000000000000000000
+      Size.PlatformDefault = False
+      Text = 'lblCoords'
+      TabOrder = 0
+    end
   end
   object ilBoards: TImageList
     Source = <

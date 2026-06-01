@@ -20,7 +20,8 @@ uses
   fAvatarSelectForm in 'src\fAvatarSelectForm.pas' {frmAvatarSelect},
   uConfig in 'src\uConfig.pas',
   fDiceForm in 'src\fDiceForm.pas',
-  fRulesForm in 'src\fRulesForm.pas';
+  fRulesForm in 'src\fRulesForm.pas',
+  fLobbyForm in 'src\fLobbyForm.pas';
 
 {$R *.res}
 

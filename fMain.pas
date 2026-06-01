@@ -1,31 +1,18 @@
 ﻿unit fMain;
 
-// Principio de separación de responsabilidades (SoC): Cada módulo tiene una
-// única responsabilidad. La UI solo dibuja y captura input; el GE solo ejecuta
-// la lógica; el Data Layer solo persiste. Esto permite testear cada capa de
-// forma independiente y escalar la conectividad de red sin reescribir la lógica del juego.
-
-// ¿Por qué separar tantos módulos? Si el GE y la UI están en el mismo form,
-// no puedes testear la lógica de turnos sin abrir la interfaz gráfica.
-// Tampoco puedes reusar el GE para el modo en red sin duplicar código.
-// Con esta arquitectura: la UI puede ser reemplazada (FMX → VCL) sin tocar el GE;
-// el GE puede correrse en un servidor headless; la capa Network puede agregarse
-// sin modificar ninguna línea del GE o la UI; la capa Data puede migrar de
-// SQLite a cualquier otra base de datos modificando solo uDatabase.
-
 interface
 
 uses
   System.SysUtils, System.Types, System.UITypes, System.Classes, System.Variants,
-  System.IOUtils,                           // ← TPath.Combine, GetDocumentsPath
+  System.IOUtils,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   FMX.Controls.Presentation, FMX.StdCtrls, FMX.Objects, FMX.Layouts,
-  System.ImageList, FMX.ImgList,
+  System.ImageList, FMX.ImgList, System.JSON, FMX.Ani,
   FireDAC.Phys.SQLite,
   FireDAC.Phys.SQLiteWrapper.Stat,
   FMX.DialogService.Sync,
-  uTypes,           // ← MAX_CELLS, BLANK_IDX, TBoardCells, TAllBoardCoords
-  uDatabase,        // ← TDatabase
+  uTypes,
+  uDatabase,
   uBoardManager,
   uPlayerManager,
   fAvatarSelectForm,
@@ -35,16 +22,14 @@ uses
   fBoardSelectForm,
   fDiceForm,
   fRulesForm,
-  FMX.Ani;
+  uNetworkManager,
+  fLobbyForm;
 
 type
   TfrmMain = class(TForm)
-    // ── Componentes del diseñador (published) ─────────────────────
     ilBoards: TImageList;
     lytBoard: TLayout;
     imgBoard: TImage;
-    stat1: TStatusBar;
-    lblCoords: TLabel;
     ilAvatars: TImageList;
     imgAvatar1: TImage;
     imgAvatar2: TImage;
@@ -53,7 +38,7 @@ type
     btnTirarDado: TButton;
     btnCapturar: TButton;
     lytButtons: TLayout;
-    rctngl1: TRectangle;
+    rctnglSidebar: TRectangle;
     lblTurno: TLabel;
     lblDado: TLabel;
     btnStartGame: TButton;
@@ -62,8 +47,10 @@ type
     rctnglSpecialEvent: TRectangle;
     imgWell: TImage;
     btnRules: TButton;
-//    FTmrWalk: TTimer; // Declarado en private
-    // ── Event handlers ────────────────────────────────────────────
+    lblCasilla: TLabel;
+    stat1: TStatusBar;
+    lblCoords: TLabel;
+
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
     procedure btnCapturarClick(Sender: TObject);
@@ -75,37 +62,40 @@ type
     procedure btnStartGameClick(Sender: TObject);
     procedure btnRulesClick(Sender: TObject);
   private
-    { Private declarations }
-    // ── Campos de estado ──────────────────────────────────────────
-    FIndex: Integer; // <-- Declarada aquí para que persista. La 'F' es convención de Delphi para 'Fields' (Campos).
-    FLastX  : Single;   // ← última posición X del mouse sobre el tablero
-    FLastY  : Single;   // ← última posición Y del mouse sobre el tablero
-//    FCurrentCell : Integer;  // ← índice de la casilla que se está definiendo
-    FDemoCell    : Integer;   // casilla actual de la demo
+    FIndex: Integer;
+    FLastX  : Single;
+    FLastY  : Single;
+    FDemoCell    : Integer;
     FTotalPlayers : Integer;
-    // ── Managers ──────────────────────────────────────────────────
-    FDB          : TDatabase; // referencia a la base de datos
+
+    // --- VARIABLES DE RED Y MULTIJUGADOR ---
+    FNetworkManager: TNetworkManager;
+    FLocalPlayerID: Integer;
+    FNextPlayerID: Integer;   // Solo lo usa el Host para auto-asignar
+    FMyClientToken: string;   // Token de seguridad para evitar Race Conditions
+    FPlayerName: string;      // Nombre de este dispositivo
+
+    FDB          : TDatabase;
     FBoardManager  : TBoardManager;
     FPlayerManager : TPlayerManager;
     FGameEngine    : TGameEngine;
 
-    // Variables para la animación paso a paso
     FWalkingPlayer: Integer;
     FWalkTargetCell: Integer;
-    FSecondaryTargetCell: Integer; // Guarda el salto de la Oca/Laberinto
-    FVisualPositions: array[1..4] of Integer; // Dónde está visualmente el pato
+    FSecondaryTargetCell: Integer;
+    FVisualPositions: array[1..4] of Integer;
     FTmrWalk: TTimer;
 
-    // Variables para "pausar" la regla hasta que termine de caminar
     FPendingRuleType: string;
     FPendingRuleMessage: string;
     FPendingRulePlayer: Integer;
 
-    // ── Métodos privados ──────────────────────────────────────────
+    FDiceIsRolling: Boolean;
+
     procedure ResetAvatarsToStart;
     function  GetAvatarImage(PlayerID: Integer): TImage;
     procedure MoveAvatarToCell(PlayerID, CellIdx: Integer);
-    // ── Callbacks del Game Engine → UI ────────────────────────────
+
     procedure GE_OnDiceRolled(PlayerID, DiceValue: Integer);
     procedure GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);
     procedure GE_OnTurnChanged(NewPlayerID: Integer);
@@ -114,48 +104,39 @@ type
 
     procedure tmrWalkTimer(Sender: TObject);
     procedure EjecutarAnimacionRegla(PlayerID: Integer; const RuleType, Message: string);
-  public
-    { Public declarations }
+    procedure Net_OnMessageReceived(const Command: string; JSONData: TJSONObject);
+    procedure OnDiceFormClose(Sender: TObject; var Action: TCloseAction);
   end;
 
 var
   frmMain: TfrmMain;
 
 const
-  // Offsets para separar visualmente los 4 avatares en la casilla inicial
-  // Forman un cuadrado de ~40px con el avatar de 128x128 como referencia
   AVATAR_START_OFFSET : array[0..3] of TPointF = (
-    (X:  0;  Y:  0),   // Player 1 — esquina superior izquierda
-    (X: 40;  Y:  0),   // Player 2 — esquina superior derecha
-    (X:  0;  Y: 40),   // Player 3 — esquina inferior izquierda
-    (X: 40;  Y: 40)    // Player 4 — esquina inferior derecha
-  );
+      (X:  0;  Y:  0),
+      (X: 45;  Y:  0),
+      (X:  0;  Y: 45),
+      (X: 45;  Y: 45)
+    );
 
 implementation
 
 {$R *.fmx}
 
-// ── Inicialización ────────────────────────────────────────────────────────────
 procedure TfrmMain.FormCreate(Sender: TObject);
-var
-  i   : Integer;
-  idx : Integer;
-  avatarImgs : array[0..3] of TImage;
 begin
   FIndex := 0;
   Randomize;
-
-  // Crear directorio de datos si no existe en esta máquina
   ForceDirectories(ExtractFilePath(DB_PATH));
 
-  // Inicializar managers (DB_PATH viene de uConfig)
   FDB            := TDatabase.Create(DB_PATH);
   FBoardManager  := TBoardManager.Create(ilBoards, FDB);
   FPlayerManager := TPlayerManager.Create(ilAvatars);
   FDemoCell      := 0;
-  FTotalPlayers  := 4;   // F4: será configurable
+  FTotalPlayers  := 4;
 
-  // Inicializar Game Engine y conectar callbacks
+  FNextPlayerID := 2; // El Host siempre es 1, el primer invitado será el 2.
+
   FGameEngine := TGameEngine.Create(FTotalPlayers);
   FGameEngine.OnDiceRolled  := GE_OnDiceRolled;
   FGameEngine.OnPlayerMoved := GE_OnPlayerMoved;
@@ -163,45 +144,30 @@ begin
   FGameEngine.OnGameOver    := GE_OnGameOver;
   FGameEngine.OnRuleTriggered := GE_OnRuleTriggered;
 
-  // Asignar avatares aleatorios a los 4 jugadores
-  // (solo para demo — será reemplazado por fAvatarSelectForm)
-  avatarImgs[0] := imgAvatar1; // TODO: comentar las siguiente 4 lineas para probar runtime results
-  avatarImgs[1] := imgAvatar2;
-  avatarImgs[2] := imgAvatar3;
-  avatarImgs[3] := imgAvatar4;
-
-  // Cargar solo los avatares de los jugadores activos
-  for i := 0 to 3 do
-  begin
-    if i < FTotalPlayers then
-    begin
-      // Verificar que aún hay avatares disponibles antes de seleccionar
-      if FPlayerManager.AvailableCount > 0 then
-      begin
-        idx := FPlayerManager.SelectRandomAvatar;
-        FPlayerManager.LoadAvatarIntoImage(idx, avatarImgs[i]);
-      end;
-      avatarImgs[i].Visible := True;
-    end
-    else
-      avatarImgs[i].Visible := False;
-  end;
+  // Limpieza inicial
+  imgAvatar1.Visible := False;
+  imgAvatar2.Visible := False;
+  imgAvatar3.Visible := False;
+  imgAvatar4.Visible := False;
 
   lblTurno.Text := 'Selecciona un tablero para iniciar';
   lblDado.Text  := 'Dado: —';
+  if Assigned(lblCasilla) then lblCasilla.Text := '';
 
-  // Para evitar mal flujo del juego
   btnTirarDado.Enabled := False;
 
-  // -- Inicializar temporizador de caminado --
   FTmrWalk := TTimer.Create(Self);
-  FTmrWalk.Interval := 250; // 250ms por cada casilla que avanza
+  FTmrWalk.Interval := 250;
   FTmrWalk.Enabled := False;
   FTmrWalk.OnTimer := tmrWalkTimer;
-end; // FormCreate()
+
+  FNetworkManager := TNetworkManager.Create;
+  FNetworkManager.OnMessageReceived := Net_OnMessageReceived;
+end;
 
 procedure TfrmMain.FormDestroy(Sender: TObject);
 begin
+  FNetworkManager.Free;
   FGameEngine.Free;
   FBoardManager.Free;
   FPlayerManager.Free;
@@ -210,48 +176,35 @@ end;
 
 procedure TfrmMain.imgBoardResize(Sender: TObject);
 begin
-  // 1. Verificamos que FBoardManager ya esté instanciado en memoria
   if Assigned(FBoardManager) then
   begin
-    // 2. Ahora sí es seguro consultar sus propiedades
     if FBoardManager.ActiveBoardHasCoords then
-      ResetAvatarsToStart; // TODO F5: reposicionar cada jugador en su casilla actual
+      ResetAvatarsToStart;
   end;
 end;
 
-// ── Captura de coordenadas (directamente sobre imgBoard) ──────────────────────
-procedure TfrmMain.imgBoardMouseMove(Sender: TObject; Shift: TShiftState; X,
-  Y: Single);
+procedure TfrmMain.imgBoardMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Single);
 begin
-// Atrapamos las coordenadas exactas del mouse justo antes del click/doble click
   FLastX := X;
   FLastY := Y;
-  lblCoords.Text := Format('X: %.1f  Y: %.1f', [X, Y]);
+  lblCoords.Text := Format('X: %.1f | Y: %.1f', [X, Y]);
 end;
 
-// DblClick — graba casilla si está en modo captura
 procedure TfrmMain.imgBoardDblClick(Sender: TObject);
 begin
   if not FBoardManager.IsCapturing then Exit;
 
-  // RecordCell normaliza internamente X,Y a 0..1
   FBoardManager.RecordCell(FLastX, FLastY);
-
-  lblCoords.Text := Format('Capturando: %d/%d  →  X:%.1f Y:%.1f',
-    [FBoardManager.CaptureProgress, MAX_CELLS, FLastX, FLastY]);
+  lblCoords.Text := Format('Capturando: %d/%d  →  X:%.1f Y:%.1f', [FBoardManager.CaptureProgress, MAX_CELLS, FLastX, FLastY]);
 
   if FBoardManager.CaptureProgress >= MAX_CELLS then
   begin
     FBoardManager.FinishCapture;
     ShowMessage('¡Coordenadas guardadas correctamente!');
-    lblCoords.Text := 'Listo';
-
-    // Restaurar avatares a la casilla 0
     ResetAvatarsToStart;
   end;
-end; // imgBoardDblClick()
+end;
 
-// btnCapturarClick — pasar dimensiones al iniciar captura
 procedure TfrmMain.btnCapturarClick(Sender: TObject);
 begin
   if FBoardManager.ActiveBoardIdx = BLANK_IDX then
@@ -259,119 +212,106 @@ begin
     ShowMessage('Selecciona un tablero primero');
     Exit;
   end;
-  // Pasar dimensiones actuales para normalización (fix coordenadas relativas)
   FBoardManager.StartCapture(
     FBoardManager.ActiveBoardIdx,
-    imgBoard.Width, // ← dimensiones actuales del imgBoard
+    imgBoard.Width,
     imgBoard.Height
   );
 
-  // Ocultar avatares para que no estorben durante la captura
   imgAvatar1.Visible := False;
   imgAvatar2.Visible := False;
   imgAvatar3.Visible := False;
   imgAvatar4.Visible := False;
 
-  lblCoords.Text := Format('Modo captura — Tablero %d: doble click en casilla 1/%d',
-                            [FBoardManager.ActiveBoardIdx, MAX_CELLS]);
+  lblCoords.Text := Format('Modo captura — Tablero %d: doble click en casilla 1/%d', [FBoardManager.ActiveBoardIdx, MAX_CELLS]);
 end;
 
-// ── Navegación de tableros ────────────────────────────────────────────────────
 procedure TfrmMain.btnRulesClick(Sender: TObject);
 begin
   if not Assigned(frmRules) then
     frmRules := TfrmRules.Create(Application);
 
   frmRules.CargarReglas(FBoardManager.ActiveBoardIdx);
-
-  // Usamos Show en lugar de ShowModal.
-  // Esto abre la ventana, pero permite seguir jugando en el tablero de fondo.
   frmRules.Show;
 end;
 
 procedure TfrmMain.btnStartGameClick(Sender: TObject);
 var
+  frmLobby: TfrmLobby;
+  frmBoard: TfrmBoardSelect;
   arrInput: TArray<string>;
-  numPlayers: Integer;
-  i: Integer;
-  frmBoard: TfrmBoardSelect; // Variable para nuestro nuevo formulario
-  selectedBoardIdx: Integer;
+  numPlayers, i: Integer;
 begin
-  // --- 1. SELECCIÓN DE TABLERO ---
-  selectedBoardIdx := -1;
-  frmBoard := TfrmBoardSelect.CreateWithImages(Application, ilBoards);
+  frmLobby := TfrmLobby.Create(Application);
   try
-    if frmBoard.ShowModal = mrOk then
-      selectedBoardIdx := frmBoard.SelectedIdx
-    else
+    if frmLobby.ShowModal = mrOk then
     begin
-      ShowMessage('Partida cancelada: No se seleccionó un tablero.');
-      Exit;
+      FPlayerName := frmLobby.PlayerName;
+
+      if frmLobby.IsHost then
+      begin
+        // ════════════════ FLUJO DEL HOST ════════════════
+        FNetworkManager.StartAsHost(7777);
+        FLocalPlayerID := 1;
+        FMyClientToken := 'HOST';
+
+        frmBoard := TfrmBoardSelect.CreateWithImages(Application, ilBoards);
+        try
+          if frmBoard.ShowModal = mrOk then
+          begin
+            FBoardManager.LoadBoardIntoImage(frmBoard.SelectedIdx, imgBoard);
+            FBoardManager.SetActiveBoard(frmBoard.SelectedIdx);
+            FGameEngine.BoardIndex := frmBoard.SelectedIdx;
+          end else Exit;
+        finally
+          frmBoard.Free;
+        end;
+
+        SetLength(arrInput, 1); arrInput[0] := '2';
+        if not TDialogServiceSync.InputQuery('Host', ['Jugadores totales (2-4):'], arrInput) then Exit;
+        numPlayers := StrToIntDef(arrInput[0], 0);
+
+        FTotalPlayers := numPlayers;
+        FGameEngine.TotalPlayers := numPlayers;
+
+        FPlayerManager.ResetTakenAvatars;
+        FPlayerManager.MarkAvatarTaken(BLANK_IDX);
+        for i := 1 to 4 do
+        begin
+           GetAvatarImage(i).Visible := False;
+           FPlayerManager.LoadAvatarIntoImage(1, GetAvatarImage(i));
+        end;
+
+        SeleccionarAvatar(1, FPlayerName);
+
+        ResetAvatarsToStart;
+        FGameEngine.StartGame;
+        btnTirarDado.Enabled := True;
+
+        ShowMessage('¡Servidor Abierto! Tu IP es: ' + FNetworkManager.GetLocalIP);
+      end
+      else
+      begin
+        // ════════════════ FLUJO DEL CLIENTE ════════════════
+        FLocalPlayerID := 0; // Desconocido. El host lo asignará.
+        FMyClientToken := IntToStr(Random(9999999)); // Etiqueta de seguridad
+
+        lblTurno.Text := 'Conectando a ' + frmLobby.HostIP + '...';
+
+        FNetworkManager.ConnectToHost(frmLobby.HostIP, 7777);
+
+        // Pedimos al host que nos asigne un asiento enviando nuestro token
+        var json := TJSONObject.Create;
+        json.AddPair('token', FMyClientToken);
+        json.AddPair('name', FPlayerName);
+        FNetworkManager.SendCommand('JOIN_REQUEST', json);
+      end;
     end;
   finally
-    frmBoard.Free;
+    frmLobby.Free;
   end;
+end;
 
-  // Cargar visualmente el tablero seleccionado y actualizar el BoardManager
-  FBoardManager.LoadBoardIntoImage(selectedBoardIdx, imgBoard);
-  FBoardManager.SetActiveBoard(selectedBoardIdx);
-
-  // Validación CRÍTICA: ¿El tablero elegido tiene coordenadas en SQLite?
-  if not FBoardManager.ActiveBoardHasCoords then
-  begin
-    ShowMessage('El tablero seleccionado no tiene sus coordenadas definidas. ' +
-                'Por favor, usa "Capturar Casillas" primero.');
-    Exit;
-  end;
-
-// --- 2. CANTIDAD DE JUGADORES ---
-
-  // Asignamos tamaño al arreglo dinámico y le damos su valor por defecto
-  SetLength(arrInput, 1);
-  arrInput[0] := '2';
-
-  // Usamos la sobrecarga de 3 parámetros. arrInput entra como '2' y sale con la respuesta.
-  if not TDialogServiceSync.InputQuery('Nueva Partida', ['¿Cuántos jugadores? (2-4):'], arrInput) then
-  begin
-    ShowMessage('Configuración de partida cancelada.');
-    Exit;
-  end;
-
-  // Leemos la respuesta que se guardó en arrInput
-  numPlayers := StrToIntDef(arrInput[0], 0);
-
-  if (numPlayers < 2) or (numPlayers > 4) then
-  begin
-    ShowMessage('La cantidad de jugadores debe ser entre 2 y 4.');
-    Exit;
-  end;
-
-  // --- 3. PREPARAR EL MOTOR ---
-  FTotalPlayers := numPlayers;
-  FGameEngine.TotalPlayers := numPlayers;
-  FPlayerManager.ResetTakenAvatars;
-
-  // Ocultar avatares viejos y bloquear el blank
-  for i := 1 to 4 do GetAvatarImage(i).Visible := False;
-  FPlayerManager.MarkAvatarTaken(BLANK_IDX);
-
-  // --- 4. SELECCIÓN DE AVATARES ---
-  for i := 1 to FTotalPlayers do
-  begin
-    if not SeleccionarAvatar(i, 'Jugador ' + IntToStr(i)) then
-    begin
-      ShowMessage('Configuración de partida cancelada.');
-      Exit;
-    end;
-  end;
-
-  // --- 5. INICIAR PARTIDA ---
-  ResetAvatarsToStart;
-  FGameEngine.StartGame;
-  btnTirarDado.Enabled := True;
-end; // btnStartGameClick()
-
-// ── Gestión de avatares ───────────────────────────────────────────────────────
 function TfrmMain.GetAvatarImage(PlayerID: Integer): TImage;
 begin
   case PlayerID of
@@ -395,44 +335,44 @@ begin
   img.Position.X := pt.X;
   img.Position.Y := pt.Y;
 
-  // ¡RESETEAR PROPIEDADES VISUALES POR SI VENÍAN DE UNA ANIMACIÓN!
   img.Opacity := 1.0;
   img.Scale.X := 1.0;
   img.Scale.Y := 1.0;
   img.RotationAngle := 0;
 
   img.Visible    := True;
-  img.BringToFront; // Nos aseguramos de que el pato no quede detrás del tablero
+  img.BringToFront;
 end;
+
 procedure TfrmMain.ResetAvatarsToStart;
 var
   basePos : TPointF;
   avatars : array[0..3] of TImage;
   i       : Integer;
 begin
-  for i := 1 to 4 do FVisualPositions[i] := 0; // Reiniciar posiciones visuales
+  for i := 1 to 4 do FVisualPositions[i] := 0;
 
   avatars[0] := imgAvatar1;
   avatars[1] := imgAvatar2;
   avatars[2] := imgAvatar3;
   avatars[3] := imgAvatar4;
 
-  // Si el tablero activo no tiene coordenadas, ocultar avatares y salir
   if not FBoardManager.ActiveBoardHasCoords then
   begin
     for i := 0 to 3 do avatars[i].Visible := False;
     Exit;
   end;
 
-  // Posición base = casilla 0 del tablero activo (tu coordenada de inicio)
+  // Restaurar el Pozo
+  if Assigned(imgWell)
+  then imgWell.Visible := True;
+
   basePos := FBoardManager.GetCellPosition(0, imgBoard.Width, imgBoard.Height);
 
   for i := 0 to 3 do
   begin
     if i < FTotalPlayers then
     begin
-      avatars[i].Width      := 64;
-      avatars[i].Height     := 64;
       avatars[i].Position.X := basePos.X + AVATAR_START_OFFSET[i].X;
       avatars[i].Position.Y := basePos.Y + AVATAR_START_OFFSET[i].Y;
       avatars[i].Visible    := True;
@@ -442,7 +382,6 @@ begin
   end;
 end;
 
-// ── Selector de avatares ──────────────────────────────────────────────────────
 function TfrmMain.SeleccionarAvatar(PlayerID: Integer; const NombreJugador: string): Boolean;
 var
   frm : TfrmAvatarSelect;
@@ -459,17 +398,29 @@ begin
     begin
       idx := frm.SelectedIdx;
 
-      // Evitar que elijan el índice 0 (Blank)
       if idx > 0 then
       begin
         FPlayerManager.MarkAvatarTaken(idx);
 
-        // Obtenemos el TImage dinámicamente según el jugador (1 al 4)
         imgDestino := GetAvatarImage(PlayerID);
         FPlayerManager.LoadAvatarIntoImage(idx, imgDestino);
 
+        imgDestino.Tag := idx;
+        imgDestino.Visible := True;
+
+        FGameEngine.PlayerAvatars[PlayerID] := idx;
+
+        if Assigned(FNetworkManager) then
+        begin
+          var json := TJSONObject.Create;
+          json.AddPair('player', TJSONNumber.Create(PlayerID));
+          json.AddPair('avatar', TJSONNumber.Create(idx));
+          FNetworkManager.SendCommand('SYNC_AVATAR', json);
+        end;
+
         Result := True;
-      end else
+      end
+      else
       begin
         ShowMessage('El avatar en blanco no es seleccionable.');
       end;
@@ -479,15 +430,24 @@ begin
   end;
 end;
 
-// ── Game Engine — F3 ──────────────────────────────────────────────────────────
 procedure TfrmMain.btnTirarDadoClick(Sender: TObject);
+var json: TJSONObject;
 begin
-  if not FGameEngine.GameActive then
+  if not FGameEngine.GameActive then Exit;
+
+  btnTirarDado.Enabled := False;
+
+  if FNetworkManager.IsHost then
   begin
-    ShowMessage('Selecciona un tablero con coordenadas para iniciar.');
-    Exit;
+    json := TJSONObject.Create;
+    json.AddPair('player', TJSONNumber.Create(FGameEngine.GetCurrentPlayer));
+    json.AddPair('dice', TJSONNumber.Create(Random(6) + 1));
+    FNetworkManager.SendCommand('SYNC_ROLL', json);
+  end
+  else
+  begin
+    FNetworkManager.SendCommand('ROLL_REQUEST');
   end;
-  FGameEngine.TryRollDice(FGameEngine.GetCurrentPlayer);
 end;
 
 procedure TfrmMain.tmrWalkTimer(Sender: TObject);
@@ -495,40 +455,45 @@ var
   step: Integer;
   pt: TPointF;
 begin
-  // ¿Ya llegamos a la casilla destino?
   if FVisualPositions[FWalkingPlayer] = FWalkTargetCell then
   begin
     FTmrWalk.Enabled := False;
 
-    // 1. ¿Hay una trampa o regla esperándolo aquí?
+    if Assigned(lblCasilla)
+    then lblCasilla.Text := Format('J%d cayó en C%d', [FWalkingPlayer, FWalkTargetCell + 1]);
+
     if FPendingRuleType <> '' then
     begin
       EjecutarAnimacionRegla(FWalkingPlayer, FPendingRuleType, FPendingRuleMessage);
-      FPendingRuleType := ''; // Limpiar la memoria
+      FPendingRuleType := '';
     end;
 
-    // 2. ¿Hay un salto secundario pendiente? (De Oca a Oca, Laberinto, etc.)
     if FSecondaryTargetCell <> -1 then
-    begin
-      FWalkTargetCell := FSecondaryTargetCell;
-      FSecondaryTargetCell := -1; // Limpiar
+      begin
+        FWalkTargetCell := FSecondaryTargetCell;
+        FSecondaryTargetCell := -1;
 
-      // Magia: Hacemos una pausa para dejar que la animación de la regla termine
-      // Usamos un hilo anónimo para no congelar tu interfaz
-      TThread.CreateAnonymousThread(procedure
-        begin
-          Sleep(1200); // 1.2 segundos para que el usuario admire el evento
-          TThread.Synchronize(nil, procedure
-            begin
-              FTmrWalk.Enabled := True; // ¡A caminar hacia el destino final!
-            end);
-        end).Start;
-    end;
+        TThread.CreateAnonymousThread(procedure
+          begin
+            Sleep(1200);
+            TThread.Synchronize(TThread(nil), procedure
+              begin
+                FTmrWalk.Enabled := True;
+              end);
+          end).Start;
+      end
+    else
+      begin
+          // ¡NUEVO! Limpiamos el objetivo para el siguiente turno
+          FWalkTargetCell := -1;
+
+          if FGameEngine.GameActive and (FGameEngine.GetCurrentPlayer = FLocalPlayerID)
+          then btnTirarDado.Enabled := True;
+      end;
 
     Exit;
   end;
 
-  // Si no hemos llegado, damos 1 paso adelante (o hacia atrás)
   if FVisualPositions[FWalkingPlayer] < FWalkTargetCell then
     step := 1
   else
@@ -539,7 +504,7 @@ begin
 
   TAnimator.AnimateFloat(GetAvatarImage(FWalkingPlayer), 'Position.X', pt.X, 0.2);
   TAnimator.AnimateFloat(GetAvatarImage(FWalkingPlayer), 'Position.Y', pt.Y, 0.2);
-end; // tmrWalkTimer()
+end;
 
 procedure TfrmMain.EjecutarAnimacionRegla(PlayerID: Integer; const RuleType, Message: string);
 var
@@ -548,7 +513,6 @@ begin
   imgPlayer := GetAvatarImage(PlayerID);
   imgPlayer.BringToFront;
 
-  // 1. Mostrar el mensaje flotante arreglado (animamos el rectángulo padre)
   if Assigned(rctnglSpecialEvent) and Assigned(lblEventoEspecial) then
   begin
     lblEventoEspecial.Text := Message;
@@ -556,25 +520,19 @@ begin
     rctnglSpecialEvent.Visible := True;
     rctnglSpecialEvent.BringToFront;
 
-    // Animamos la opacidad del rectángulo (se desvanecerá junto con su texto)
     TAnimator.AnimateFloat(rctnglSpecialEvent, 'Opacity', 0.0, 4.0);
   end;
 
-// ── ANIMACIÓN: EL POZO ──
   if RuleType = 'WELL' then
   begin
     if Assigned(imgWell) then
     begin
       var ptAbs, ptLoc: TPointF;
+      ptAbs := imgWell.LocalToAbsolute(TPointF.Create(imgWell.Width / 2, imgWell.Height / 2));
+      ptLoc := (imgPlayer.Parent as TControl).AbsoluteToLocal(ptAbs);
 
-      // Truco maestro: Obtenemos la posición exacta del pozo en la pantalla (Absoluta)
-      ptAbs := imgWell.LocalToAbsolute(TPointF.Create(0,0));
-      // Y la convertimos al idioma del contenedor donde viven los patos (Local)
-      ptLoc := lytBoard.AbsoluteToLocal(ptAbs);
-
-      // Ahora el pato volará exactamente hacia el pozo sin fallar
-      TAnimator.AnimateFloat(imgPlayer, 'Position.X', ptLoc.X + 20, 1.0);
-      TAnimator.AnimateFloat(imgPlayer, 'Position.Y', ptLoc.Y + 20, 1.0);
+      TAnimator.AnimateFloat(imgPlayer, 'Position.X', ptLoc.X - (imgPlayer.Width / 2), 1.0);
+      TAnimator.AnimateFloat(imgPlayer, 'Position.Y', ptLoc.Y - (imgPlayer.Height / 2), 1.0);
 
       TAnimator.AnimateFloat(imgPlayer, 'RotationAngle', 1080, 2.0);
       TAnimator.AnimateFloat(imgPlayer, 'Scale.X', 0.1, 2.0);
@@ -582,8 +540,6 @@ begin
       TAnimator.AnimateFloat(imgPlayer, 'Opacity', 0.0, 2.0);
     end;
   end
-
-// ── ANIMACIÓN: LA MUERTE (CALAVERA) ──
   else if RuleType = 'DEATH' then
   begin
     TAnimator.AnimateFloat(imgPlayer, 'Position.X', imgPlayer.Position.X + 15, 0.05);
@@ -591,13 +547,8 @@ begin
     TAnimator.AnimateFloatDelay(imgPlayer, 'Position.X', imgPlayer.Position.X + 15, 0.05, 0.1);
     TAnimator.AnimateFloatDelay(imgPlayer, 'Position.Y', imgPlayer.Position.Y + 800, 1.0, 0.3);
     TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 0.0, 0.5, 0.3);
-
-    // Como regresa al inicio, teletransportamos visualmente su posición interna
-    // para evitar que tenga que caminar 58 casillas hacia atrás.
     FVisualPositions[PlayerID] := 0;
   end
-
-  // ── ANIMACIÓN: DE OCA A OCA ──
   else if RuleType = 'GOOSE' then
   begin
     TAnimator.AnimateFloat(imgPlayer, 'Scale.X', 1.8, 0.3);
@@ -605,8 +556,6 @@ begin
     TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.X', 1.0, 0.3, 0.4);
     TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.Y', 1.0, 0.3, 0.4);
   end
-
-  // ── ANIMACIÓN: EL LABERINTO ──
   else if RuleType = 'MAZE' then
   begin
     TAnimator.AnimateFloat(imgPlayer, 'RotationAngle', 1080, 1.5);
@@ -614,33 +563,59 @@ begin
     TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 1.0, 0.2, 0.2);
     TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 0.2, 0.2, 0.4);
     TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 1.0, 0.2, 0.6);
+  end
+  else if RuleType = 'BOUNCE' then
+  begin
+    TAnimator.AnimateFloat(imgPlayer, 'Position.X', imgPlayer.Position.X + 20, 0.05);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Position.X', imgPlayer.Position.X - 20, 0.05, 0.05);
+    TAnimator.AnimateFloat(imgPlayer, 'Opacity', 0.5, 0.2);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 1.0, 0.2, 0.2);
+  end
+  else if (RuleType = 'GOOSE') or (RuleType = 'BRIDGE') or (RuleType = 'DICE') then
+  begin
+    TAnimator.AnimateFloat(imgPlayer, 'Scale.X', 1.8, 0.3);
+    TAnimator.AnimateFloat(imgPlayer, 'Scale.Y', 1.8, 0.3);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.X', 1.0, 0.3, 0.4);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.Y', 1.0, 0.3, 0.4);
+  end
+  else if (RuleType = 'INN') or (RuleType = 'PRISON') then
+  begin
+    TAnimator.AnimateFloat(imgPlayer, 'RotationAngle', 15, 0.1);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'RotationAngle', -15, 0.1, 0.1);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'RotationAngle', 15, 0.1, 0.2);
+    TAnimator.AnimateFloatDelay(imgPlayer, 'RotationAngle', 0, 0.1, 0.3);
+    TAnimator.AnimateFloat(imgPlayer, 'Opacity', 0.6, 0.5);
   end;
-end; // EjecutarAnimacionRegla()
+end;
 
+// 1. EL NUEVO MÉTODO QUE ESCUCHA CUANDO EL DADO SE CIERRA
+procedure TfrmMain.OnDiceFormClose(Sender: TObject; var Action: TCloseAction);
+begin
+  Action := TCloseAction.caFree; // Libera la memoria del dado
+  FDiceIsRolling := False;
+
+  // ¡El dado ya desapareció! Si el pato estaba esperando para moverse, lo soltamos:
+  if (FWalkingPlayer > 0) and (FWalkTargetCell <> -1) then
+    FTmrWalk.Enabled := True;
+end;
+
+// 2. ACTUALIZAR EL TIRADO DE DADO
 procedure TfrmMain.GE_OnDiceRolled(PlayerID, DiceValue: Integer);
 var
   frmDice: TfrmDice;
 begin
-  // Creamos el formulario
+  FDiceIsRolling := True; // Levantamos la bandera: ¡Nadie camina!
   frmDice := TfrmDice.CreateWithResult(Application, ilDiceFaces, DiceValue);
-
-  // ¡El bloque try debe ir acompañado de un begin si abarca más de una línea de código!
-  // Aunque en este caso es una sola línea (frmDice.ShowModal), la convención es ponerlo.
-  try
-    frmDice.ShowModal; // El juego se pausa aquí hasta que la animación termine
-  finally
-    frmDice.Free;
-  end;
-
+  frmDice.OnClose := OnDiceFormClose; // Conectamos la oreja al evento de cierre
+  frmDice.Show;
   lblDado.Text := Format('J%d tiró: %d', [PlayerID, DiceValue]);
 end;
 
+// 3. ACTUALIZAR EL MOVIMIENTO DEL JUGADOR
 procedure TfrmMain.GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);
 var
   img: TImage;
 begin
-  // ¡EL ANTÍDOTO CONTRA FANTASMAS!
-  // Restauramos al pato a su estado original ANTES de que empiece a caminar
   img := GetAvatarImage(PlayerID);
   img.Opacity := 1.0;
   img.Scale.X := 1.0;
@@ -649,25 +624,26 @@ begin
   img.Visible := True;
   img.BringToFront;
 
-  if not FTmrWalk.Enabled then
+  // Si ya había un destino programado, lo mandamos a la cola secundaria
+  if FWalkTargetCell <> -1 then
   begin
-    // Es el movimiento normal de los dados
-    FWalkingPlayer := PlayerID;
-    FWalkTargetCell := NewCellIdx;
-    FSecondaryTargetCell := -1;
-    FTmrWalk.Enabled := True;
+    FSecondaryTargetCell := NewCellIdx;
   end
   else
   begin
-    // El motor ya calculó el salto extra, lo guardamos para después
-    FSecondaryTargetCell := NewCellIdx;
+    // Es el primer movimiento del turno
+    FWalkingPlayer := PlayerID;
+    FWalkTargetCell := NewCellIdx;
+    FSecondaryTargetCell := -1;
+
+    // ¡SOLO EMPEZAMOS A CAMINAR SI EL DADO YA NO ESTÁ GIRANDO!
+    if not FDiceIsRolling then
+      FTmrWalk.Enabled := True;
   end;
-end; // GE_OnPlayerMoved()
+end;
 
 procedure TfrmMain.GE_OnRuleTriggered(PlayerID: Integer; const RuleType, Message: string);
 begin
-  // El motor nos manda una regla, pero el pato apenas va a empezar a caminar.
-  // Guardamos la regla en memoria para ejecutarla después.
   FPendingRulePlayer := PlayerID;
   FPendingRuleType := RuleType;
   FPendingRuleMessage := Message;
@@ -676,13 +652,169 @@ end;
 procedure TfrmMain.GE_OnTurnChanged(NewPlayerID: Integer);
 begin
   lblTurno.Text := Format('Turno: Jugador %d', [NewPlayerID]);
+
+  if NewPlayerID = FLocalPlayerID then
+  begin
+    rctnglSidebar.Fill.Color := TAlphaColorRec.Limegreen;
+    lblTurno.Text := '¡ES TU TURNO!';
+    if not FTmrWalk.Enabled and FGameEngine.GameActive then
+      btnTirarDado.Enabled := True;
+  end
+  else
+  begin
+    rctnglSidebar.Fill.Color := TAlphaColorRec.Indianred;
+    btnTirarDado.Enabled := False;
+  end;
 end;
 
 procedure TfrmMain.GE_OnGameOver(WinnerID: Integer);
 begin
   lblTurno.Text := Format('🏆 ¡Jugador %d ganó!', [WinnerID]);
   lblDado.Text  := '— Partida terminada —';
-  ShowMessage(Format('¡Jugador %d ganó!', [WinnerID]));
+
+  TThread.CreateAnonymousThread(procedure
+    begin
+      Sleep(2000);
+      TThread.Synchronize(TThread(nil), procedure
+        begin
+          ShowMessage(Format('¡Felicidades! ¡El Jugador %d ganó la partida!', [WinnerID]));
+        end);
+    end).Start;
+end;
+
+procedure TfrmMain.Net_OnMessageReceived(const Command: string; JSONData: TJSONObject);
+var
+  i, pos: Integer;
+  json: TJSONObject;
+  pt: TPointF;
+  img: TImage;
+begin
+  if Command = 'JOIN_REQUEST' then
+  begin
+    // El host procesa a los nuevos invitados y les asigna asiento
+    if FNetworkManager.IsHost then
+    begin
+      if FNextPlayerID <= FTotalPlayers then
+      begin
+        json := TJSONObject.Create;
+        json.AddPair('assigned_id', TJSONNumber.Create(FNextPlayerID));
+        json.AddPair('token', JSONData.GetValue<string>('token')); // Rebotar el token de seguridad
+        FNetworkManager.SendCommand('JOIN_ACCEPTED', json);
+        Inc(FNextPlayerID);
+      end;
+    end;
+  end
+  else if Command = 'JOIN_ACCEPTED' then
+  begin
+    // El cliente verifica si ese asiento es para él usando su token único
+    if (not FNetworkManager.IsHost) and (FLocalPlayerID = 0) then
+    begin
+      if JSONData.GetValue<string>('token') = FMyClientToken then
+      begin
+        FLocalPlayerID := JSONData.GetValue<Integer>('assigned_id');
+        lblTurno.Text := 'Esperando sincronización...';
+
+        // Ya tengo mi ID, ahora pido ver el tablero de los demás
+        FNetworkManager.SendCommand('SYNC_ALL_REQUEST');
+      end;
+    end;
+  end
+  else if Command = 'STATE' then
+  begin
+    if Assigned(JSONData) then
+    begin
+      FGameEngine.ImportStateFromJSON(JSONData.ToJSON);
+
+      if FBoardManager.ActiveBoardIdx <> FGameEngine.BoardIndex then
+      begin
+        FBoardManager.LoadBoardIntoImage(FGameEngine.BoardIndex, imgBoard);
+        FBoardManager.SetActiveBoard(FGameEngine.BoardIndex);
+      end;
+
+      for i := 1 to 4 do
+      begin
+        var avIdx := FGameEngine.PlayerAvatars[i];
+        if avIdx > 0 then
+        begin
+          FPlayerManager.MarkAvatarTaken(avIdx);
+          FPlayerManager.LoadAvatarIntoImage(avIdx, GetAvatarImage(i));
+          GetAvatarImage(i).Tag := avIdx;
+          GetAvatarImage(i).Visible := True;
+        end;
+      end;
+
+      for i := 1 to FGameEngine.TotalPlayers do
+      begin
+        pos := FGameEngine.GetPlayerPosition(i);
+        pt := FBoardManager.GetCellPosition(pos, imgBoard.Width, imgBoard.Height);
+        img := GetAvatarImage(i);
+
+        img.Opacity := 1.0;
+        img.Scale.X := 1.0;
+        img.Scale.Y := 1.0;
+
+        if pos = 0 then
+        begin
+           img.Position.X := pt.X + AVATAR_START_OFFSET[i-1].X;
+           img.Position.Y := pt.Y + AVATAR_START_OFFSET[i-1].Y;
+        end
+        else
+        begin
+           img.Position.X := pt.X;
+           img.Position.Y := pt.Y;
+        end;
+        img.Visible := True;
+        img.BringToFront;
+      end;
+
+      // Si soy el cliente nuevo y acabo de cargar el tablero ajeno, ¡es hora de elegir mi Pato!
+      if (not FNetworkManager.IsHost) and (FLocalPlayerID > 0) and (FGameEngine.PlayerAvatars[FLocalPlayerID] = 0) then
+      begin
+         SeleccionarAvatar(FLocalPlayerID, FPlayerName);
+      end;
+
+      if not FGameEngine.GameActive then
+        FGameEngine.StartGame;
+    end;
+  end
+  else if Command = 'SYNC_ROLL' then
+  begin
+    if Assigned(JSONData) then
+    begin
+      var pID := JSONData.GetValue<Integer>('player');
+      var dVal := JSONData.GetValue<Integer>('dice');
+      FGameEngine.TryRollDice(pID, dVal);
+    end;
+  end
+  else if (Command = 'ROLL_REQUEST') and FNetworkManager.IsHost then
+  begin
+    json := TJSONObject.Create;
+    json.AddPair('player', TJSONNumber.Create(FGameEngine.GetCurrentPlayer));
+    json.AddPair('dice', TJSONNumber.Create(Random(6) + 1));
+    FNetworkManager.SendCommand('SYNC_ROLL', json);
+  end
+  else if Command = 'SYNC_AVATAR' then
+  begin
+    if Assigned(JSONData) then
+    begin
+      var pID := JSONData.GetValue<Integer>('player');
+      var avIdx := JSONData.GetValue<Integer>('avatar');
+
+      FGameEngine.PlayerAvatars[pID] := avIdx;
+      FPlayerManager.MarkAvatarTaken(avIdx);
+      FPlayerManager.LoadAvatarIntoImage(avIdx, GetAvatarImage(pID));
+
+      GetAvatarImage(pID).Tag := avIdx;
+      GetAvatarImage(pID).Visible := True;
+
+      // NOTA: Hemos eliminado el "BroadcastState" aquí porque arruinaba la carrera visual.
+      // SendCommand ya se encarga de repartir este SYNC_AVATAR a todos.
+    end;
+  end
+  else if (Command = 'SYNC_ALL_REQUEST') and FNetworkManager.IsHost then
+  begin
+    FNetworkManager.BroadcastState(FGameEngine.ExportStateToJSON);
+  end;
 end;
 
 end.

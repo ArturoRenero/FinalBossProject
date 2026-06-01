@@ -241,6 +241,7 @@
         <DCCReference Include="src\uConfig.pas"/>
         <DCCReference Include="src\fDiceForm.pas"/>
         <DCCReference Include="src\fRulesForm.pas"/>
+        <DCCReference Include="src\fLobbyForm.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
