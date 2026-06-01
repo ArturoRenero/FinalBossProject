@@ -7,9 +7,7 @@ uses
   uTypes in 'src\uTypes.pas',
   uDatabase in 'src\uDatabase.pas',
   uBoardManager in 'src\uBoardManager.pas',
-  uDiceForm in 'src\uDiceForm.pas',
   fBoardSelectForm in 'src\fBoardSelectForm.pas',
-  fRulesForm in 'src\fRulesForm.pas',
   uConfigForm in 'src\uConfigForm.pas',
   uGameEngine in 'src\uGameEngine.pas',
   uTurnManager in 'src\uTurnManager.pas',
@@ -20,7 +18,10 @@ uses
   uNetworkManager in 'src\uNetworkManager.pas',
   uBluetoothManager in 'src\uBluetoothManager.pas',
   fAvatarSelectForm in 'src\fAvatarSelectForm.pas' {frmAvatarSelect},
-  uConfig in 'src\uConfig.pas';
+  uConfig in 'src\uConfig.pas',
+  fDiceForm in 'src\fDiceForm.pas',
+  fRulesForm in 'src\fRulesForm.pas',
+  fLobbyForm in 'src\fLobbyForm.pas';
 
 {$R *.res}
 
