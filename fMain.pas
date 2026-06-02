@@ -71,9 +71,9 @@ type
     // --- VARIABLES DE RED Y MULTIJUGADOR ---
     FNetworkManager: TNetworkManager;
     FLocalPlayerID: Integer;
-    FNextPlayerID: Integer;   // Solo lo usa el Host para auto-asignar
-    FMyClientToken: string;   // Token de seguridad para evitar Race Conditions
-    FPlayerName: string;      // Nombre de este dispositivo
+    FNextPlayerID: Integer;
+    FMyClientToken: string;
+    FPlayerName: string;
 
     FDB          : TDatabase;
     FBoardManager  : TBoardManager;
@@ -155,6 +155,11 @@ begin
   if Assigned(lblCasilla) then lblCasilla.Text := '';
 
   btnTirarDado.Enabled := False;
+
+  // ¡CORRECCIÓN 1! Inicializar explícitamente en -1 para liberar el bloqueo de movimiento
+  FWalkTargetCell := -1;
+  FSecondaryTargetCell := -1;
+  FWalkingPlayer := 0;
 
   FTmrWalk := TTimer.Create(Self);
   FTmrWalk.Interval := 250;
@@ -406,6 +411,11 @@ begin
         FPlayerManager.LoadAvatarIntoImage(idx, imgDestino);
 
         imgDestino.Tag := idx;
+
+        // ¡CORRECCIÓN 3! Tamaño a 86x86
+        imgDestino.Width := 86;
+        imgDestino.Height := 86;
+
         imgDestino.Visible := True;
 
         FGameEngine.PlayerAvatars[PlayerID] := idx;
@@ -484,7 +494,7 @@ begin
       end
     else
       begin
-          // ¡NUEVO! Limpiamos el objetivo para el siguiente turno
+          // Limpiamos el objetivo para el siguiente turno
           FWalkTargetCell := -1;
 
           if FGameEngine.GameActive and (FGameEngine.GetCurrentPlayer = FLocalPlayerID)
@@ -731,6 +741,9 @@ begin
         FBoardManager.SetActiveBoard(FGameEngine.BoardIndex);
       end;
 
+      // ¡CORRECCIÓN 2! Mostrar explícitamente el pozo para los clientes
+      if Assigned(imgWell) then imgWell.Visible := True;
+
       for i := 1 to 4 do
       begin
         var avIdx := FGameEngine.PlayerAvatars[i];
@@ -739,6 +752,11 @@ begin
           FPlayerManager.MarkAvatarTaken(avIdx);
           FPlayerManager.LoadAvatarIntoImage(avIdx, GetAvatarImage(i));
           GetAvatarImage(i).Tag := avIdx;
+
+          // ¡CORRECCIÓN 3! Tamaño a 86x86
+          GetAvatarImage(i).Width := 86;
+          GetAvatarImage(i).Height := 86;
+
           GetAvatarImage(i).Visible := True;
         end;
       end;
@@ -805,10 +823,12 @@ begin
       FPlayerManager.LoadAvatarIntoImage(avIdx, GetAvatarImage(pID));
 
       GetAvatarImage(pID).Tag := avIdx;
-      GetAvatarImage(pID).Visible := True;
 
-      // NOTA: Hemos eliminado el "BroadcastState" aquí porque arruinaba la carrera visual.
-      // SendCommand ya se encarga de repartir este SYNC_AVATAR a todos.
+      // ¡CORRECCIÓN 3! Tamaño a 86x86
+      GetAvatarImage(pID).Width := 86;
+      GetAvatarImage(pID).Height := 86;
+
+      GetAvatarImage(pID).Visible := True;
     end;
   end
   else if (Command = 'SYNC_ALL_REQUEST') and FNetworkManager.IsHost then
