@@ -1,65 +1,78 @@
-unit fLobbyForm;
+﻿unit fLobbyForm;
 
 interface
 
 uses
   System.SysUtils, System.Types, System.UITypes, System.Classes, System.Variants,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs, FMX.StdCtrls,
-  FMX.Controls.Presentation, FMX.Edit, FMX.Layouts, FMX.Objects;
+  FMX.Controls.Presentation, FMX.Edit, FMX.Layouts, FMX.Objects,
+  System.Bluetooth, FMX.Listbox; // Listbox añadido para el ComboBox
 
 type
   TfrmLobby = class(TForm)
   private
     FLblTitle: TLabel;
-    FLblSubtitle: TLabel;
 
-    // Inputs
+    FRbLAN: TRadioButton;
+    FRbBT: TRadioButton;
+
     FEdtName: TEdit;
     FEdtIP: TEdit;
+    FCboDevices: TComboBox;
+    FCboPlayers: TComboBox; // <-- NUEVO: Selector de Jugadores/Asiento
 
-    // Botones
     FBtnHost: TButton;
     FBtnJoin: TButton;
     FBtnCancel: TButton;
 
-    // Resultados que leeremos desde fMain
     FIsHost: Boolean;
+    FUseBluetooth: Boolean;
     FPlayerName: string;
     FHostIP: string;
+    FBluetoothDeviceName: string;
+    FSelectedNumber: Integer; // <-- NUEVO: Guardará si eligieron 2, 3 o 4
 
     procedure BuildUI;
+    procedure LoadBluetoothDevices;
+    procedure OnNetworkTypeChange(Sender: TObject);
+
     procedure btnHostClick(Sender: TObject);
     procedure btnJoinClick(Sender: TObject);
     procedure btnCancelClick(Sender: TObject);
   public
     constructor Create(AOwner: TComponent); override;
 
-    // Propiedades de solo lectura para acceder desde fuera
     property IsHost: Boolean read FIsHost;
+    property UseBluetooth: Boolean read FUseBluetooth;
     property PlayerName: string read FPlayerName;
     property HostIP: string read FHostIP;
+    property BluetoothDeviceName: string read FBluetoothDeviceName;
+    property SelectedNumber: Integer read FSelectedNumber; // Exponemos el valor
   end;
 
 implementation
 
 constructor TfrmLobby.Create(AOwner: TComponent);
 begin
-  inherited CreateNew(AOwner); // Ignorar archivo .fmx
+  inherited CreateNew(AOwner);
   FIsHost := False;
+  FUseBluetooth := False;
   FPlayerName := '';
   FHostIP := '';
+  FBluetoothDeviceName := '';
+  FSelectedNumber := 2;
   BuildUI;
 end;
 
 procedure TfrmLobby.BuildUI;
 var
-  lytName, lytNetwork, lytButtons: TLayout;
-  lblInfoName, lblInfoIP: TLabel;
+  lytName, lytNetworkType, lytConnection, lytPlayers, lytButtons: TLayout;
+  lblInfoName, lblInfoConn, lblInfoPlayers: TLabel;
   rectBG: TRectangle;
 begin
   Caption := 'Lobby Multijugador';
   Width := 400;
-  Height := 450;
+  Height := 560; // Aumentamos la altura para que quepa el nuevo combo
   Position := TFormPosition.ScreenCenter;
   BorderStyle := TFmxFormBorderStyle.Single;
 
@@ -68,33 +81,62 @@ begin
   begin
     Parent := Self;
     Align := TAlignLayout.Client;
-    Fill.Color := $FFFFAE1D; // usan 8 caracteres porque incluyen el canal Alfa (Transparencia) al principio (ARGB)
+    Fill.Color := $FFFFAE1D; // quiero usar este color, no el azul anterior
     Stroke.Kind := TBrushKind.None;
   end;
 
-  // T�tulo
   FLblTitle := TLabel.Create(Self);
   with FLblTitle do
   begin
     Parent := rectBG;
     Align := TAlignLayout.Top;
     Height := 50;
-    Margins.Top := 20;
-    Text := 'Multijugador LAN / WiFi';
-    TextSettings.Font.Size := 20;
+    Margins.Top := 15;
+    Text := 'Multijugador';
+    TextSettings.Font.Size := 22;
     TextSettings.Font.Style := [TFontStyle.fsBold];
     TextSettings.HorzAlign := TTextAlign.Center;
     TextSettings.FontColor := TAlphaColorRec.White;
   end;
 
-  // Secci�n 1: Nombre del Jugador
+  // ── 1. Selector de Tipo de Red ──
+  lytNetworkType := TLayout.Create(Self);
+  with lytNetworkType do
+  begin
+    Parent := rectBG;
+    Align := TAlignLayout.Top;
+    Height := 40;
+    Margins.Top := 10;
+  end;
+
+  FRbLAN := TRadioButton.Create(Self);
+  with FRbLAN do
+  begin
+    Parent := lytNetworkType;
+    Position.Point := TPointF.Create(80, 10);
+    Text := 'LAN / WiFi';
+    IsChecked := True;
+    TextSettings.FontColor := TAlphaColorRec.White;
+    OnChange := OnNetworkTypeChange;
+  end;
+
+  FRbBT := TRadioButton.Create(Self);
+  with FRbBT do
+  begin
+    Parent := lytNetworkType;
+    Position.Point := TPointF.Create(220, 10);
+    Text := 'Bluetooth';
+    TextSettings.FontColor := TAlphaColorRec.White;
+    OnChange := OnNetworkTypeChange;
+  end;
+
+  // ── 2. Nombre del Jugador ──
   lytName := TLayout.Create(Self);
   with lytName do
   begin
     Parent := rectBG;
     Align := TAlignLayout.Top;
-    Height := 80;
-    Margins.Top := 10;
+    Height := 75;
   end;
 
   lblInfoName := TLabel.Create(Self);
@@ -102,7 +144,7 @@ begin
   begin
     Parent := lytName;
     Position.Point := TPointF.Create(40, 10);
-    Width := 300; // �SOLUCI�N AL TEXTO CORTADO!
+    Width := 300;
     Text := 'Tu Nombre de Jugador:';
     TextSettings.FontColor := TAlphaColorRec.White;
   end;
@@ -117,37 +159,79 @@ begin
     Text := 'Jugador ' + IntToStr(Random(99) + 1);
   end;
 
-  // Secci�n 2: Conexi�n
-  lytNetwork := TLayout.Create(Self);
-  with lytNetwork do
+  // ── NUEVO: 3. Selector de Jugadores / Asientos ──
+  lytPlayers := TLayout.Create(Self);
+  with lytPlayers do
   begin
     Parent := rectBG;
     Align := TAlignLayout.Top;
-    Height := 100;
-    Margins.Top := 20;
+    Height := 75;
   end;
 
-  lblInfoIP := TLabel.Create(Self);
-  with lblInfoIP do
+  lblInfoPlayers := TLabel.Create(Self);
+  with lblInfoPlayers do
   begin
-    Parent := lytNetwork;
+    Parent := lytPlayers;
     Position.Point := TPointF.Create(40, 10);
-    Width := 300; // �SOLUCI�N AL TEXTO CORTADO!
-    Text := 'Si vas a unirte, escribe la IP del Host:';
+    Width := 300;
+    Text := 'Total Jugadores (Host) / Tu Asiento (Cliente):';
+    TextSettings.FontColor := TAlphaColorRec.White;
+  end;
+
+  FCboPlayers := TComboBox.Create(Self);
+  with FCboPlayers do
+  begin
+    Parent := lytPlayers;
+    Position.Point := TPointF.Create(40, 35);
+    Width := 300;
+    Height := 32;
+    Items.Add('2 Jugadores / Asiento 2');
+    Items.Add('3 Jugadores / Asiento 3');
+    Items.Add('4 Jugadores / Asiento 4');
+    ItemIndex := 0; // Por defecto es 2
+  end;
+
+  // ── 4. Datos de Conexión ──
+  lytConnection := TLayout.Create(Self);
+  with lytConnection do
+  begin
+    Parent := rectBG;
+    Align := TAlignLayout.Top;
+    Height := 80;
+    Margins.Top := 10;
+  end;
+
+  lblInfoConn := TLabel.Create(Self);
+  with lblInfoConn do
+  begin
+    Parent := lytConnection;
+    Position.Point := TPointF.Create(40, 10);
+    Width := 300;
+    Text := 'Si vas a unirte (Cliente), ingresa los datos:';
     TextSettings.FontColor := TAlphaColorRec.White;
   end;
 
   FEdtIP := TEdit.Create(Self);
   with FEdtIP do
   begin
-    Parent := lytNetwork;
+    Parent := lytConnection;
     Position.Point := TPointF.Create(40, 35);
     Width := 300;
     Height := 32;
-    TextPrompt := 'Ej. 192.168.1.100';
+    TextPrompt := 'IP del Host (Ej. 192.168.1.100 o 127.0.0.1)';
   end;
 
-  // Secci�n 3: Botones
+  FCboDevices := TComboBox.Create(Self);
+  with FCboDevices do
+  begin
+    Parent := lytConnection;
+    Position.Point := TPointF.Create(40, 35);
+    Width := 300;
+    Height := 32;
+    Visible := False;
+  end;
+
+  // ── 5. Botones ──
   lytButtons := TLayout.Create(Self);
   with lytButtons do
   begin
@@ -188,39 +272,72 @@ begin
     Text := 'Cancelar';
     OnClick := btnCancelClick;
   end;
-end; // BuildUI()
+end;
+
+procedure TfrmLobby.OnNetworkTypeChange(Sender: TObject);
+begin
+  FEdtIP.Visible := FRbLAN.IsChecked;
+  FCboDevices.Visible := FRbBT.IsChecked;
+  if FRbBT.IsChecked then LoadBluetoothDevices;
+end;
+
+procedure TfrmLobby.LoadBluetoothDevices;
+var
+  BTManager: TBluetoothManager;
+  Devices: TBluetoothDeviceList;
+  i: Integer;
+begin
+  FCboDevices.Items.Clear;
+  try
+    BTManager := TBluetoothManager.Current;
+    if Assigned(BTManager) and (BTManager.ConnectionState = TBluetoothConnectionState.Connected) then
+    begin
+      Devices := BTManager.GetPairedDevices;
+      for i := 0 to Devices.Count - 1 do
+        FCboDevices.Items.Add(Devices[i].DeviceName);
+
+      if FCboDevices.Items.Count > 0 then
+        FCboDevices.ItemIndex := 0
+      else
+        FCboDevices.Items.Add('No hay dispositivos emparejados');
+    end
+    else
+      FCboDevices.Items.Add('Bluetooth apagado o bloqueado');
+  except
+    on E: Exception do
+      FCboDevices.Items.Add('Sin permisos de Android');
+  end;
+
+  FCboDevices.ItemIndex := 0;
+end;
 
 procedure TfrmLobby.btnHostClick(Sender: TObject);
 begin
-  if Trim(FEdtName.Text) = '' then
-  begin
-    ShowMessage('Por favor escribe un nombre.');
-    Exit;
-  end;
+  if Trim(FEdtName.Text) = '' then Exit;
 
   FIsHost := True;
+  FUseBluetooth := FRbBT.IsChecked;
   FPlayerName := Trim(FEdtName.Text);
-  ModalResult := mrOk; // Cerramos el form indicando �xito
+  // +2 porque el ItemIndex 0 corresponde a "2 Jugadores"
+  FSelectedNumber := FCboPlayers.ItemIndex + 2;
+  ModalResult := mrOk;
 end;
 
 procedure TfrmLobby.btnJoinClick(Sender: TObject);
 begin
-  if Trim(FEdtName.Text) = '' then
-  begin
-    ShowMessage('Por favor escribe un nombre.');
-    Exit;
-  end;
-
-  if Trim(FEdtIP.Text) = '' then
-  begin
-    ShowMessage('Debes escribir la IP de la computadora Host para unirte.');
-    Exit;
-  end;
+  if Trim(FEdtName.Text) = '' then Exit;
 
   FIsHost := False;
+  FUseBluetooth := FRbBT.IsChecked;
   FPlayerName := Trim(FEdtName.Text);
-  FHostIP := Trim(FEdtIP.Text);
-  ModalResult := mrOk; // Cerramos el form indicando �xito
+  FSelectedNumber := FCboPlayers.ItemIndex + 2;
+
+  if FUseBluetooth then
+    FBluetoothDeviceName := FCboDevices.Selected.Text
+  else
+    FHostIP := Trim(FEdtIP.Text);
+
+  ModalResult := mrOk;
 end;
 
 procedure TfrmLobby.btnCancelClick(Sender: TObject);

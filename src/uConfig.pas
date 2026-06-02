@@ -8,14 +8,28 @@ unit uConfig;
 
 interface
 
-const
-  // Ruta absoluta a la base de datos del juego.
-  // Cambia esta línea a la ruta correspondiente en tu equipo.
-  DB_PATH = 'P:\DelphiStuff\FinalBossProject\data\goose.db';
+uses
+  System.IOUtils, System.SysUtils;
 
-  // Puerto de red para partidas multijugador LAN (Fase 11)
-  NET_PORT = 7777;
+function GetDBPath: string;
 
 implementation
+
+function GetDBPath: string;
+begin
+  // Ubicacion de la BD
+  {$IF DEFINED (MSWINDOWS)}
+  // Windows
+    // Ruta absoluta a la base de datos del juego.
+    // Cambia esta línea a la ruta correspondiente en tu equipo.
+    Result := TPath.Combine(ExtractFilePath(ParamStr(0)), 'LaOCA.db');
+
+  // Si compilamos para Windows
+  {$ELSE}
+  // Android, iOS, Mac
+    Result := TPath.Combine(TPath.GetDocumentsPath, 'LaOCA.db');
+
+  {$ENDIF}
+end;
 
 end.

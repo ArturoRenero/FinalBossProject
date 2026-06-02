@@ -10,7 +10,6 @@ uses
   System.ImageList, FMX.ImgList, System.JSON, FMX.Ani,
   FireDAC.Phys.SQLite,
   FireDAC.Phys.SQLiteWrapper.Stat,
-  FMX.DialogService.Sync,
   uTypes,
   uDatabase,
   uBoardManager,
@@ -22,8 +21,9 @@ uses
   fBoardSelectForm,
   fDiceForm,
   fRulesForm,
+  fLobbyForm,
   uNetworkManager,
-  fLobbyForm;
+  uBluetoothManager;
 
 type
   TfrmMain = class(TForm)
@@ -57,7 +57,6 @@ type
     procedure imgBoardDblClick(Sender: TObject);
     procedure btnTirarDadoClick(Sender: TObject);
     procedure imgBoardMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Single);
-    function SeleccionarAvatar(PlayerID: Integer; const NombreJugador: string): Boolean;
     procedure imgBoardResize(Sender: TObject);
     procedure btnStartGameClick(Sender: TObject);
     procedure btnRulesClick(Sender: TObject);
@@ -68,8 +67,10 @@ type
     FDemoCell    : Integer;
     FTotalPlayers : Integer;
 
-    // --- VARIABLES DE RED Y MULTIJUGADOR ---
+    FUseBluetooth: Boolean;
     FNetworkManager: TNetworkManager;
+    FBluetoothManager: TBluetoothNetworkManager;
+
     FLocalPlayerID: Integer;
     FNextPlayerID: Integer;
     FMyClientToken: string;
@@ -92,9 +93,15 @@ type
 
     FDiceIsRolling: Boolean;
 
+    function NetIsHost: Boolean;
+    procedure NetSendCommand(const Command: string; JSONData: TJSONObject = nil);
+    procedure NetBroadcastState(const StateJSON: string);
+
     procedure ResetAvatarsToStart;
     function  GetAvatarImage(PlayerID: Integer): TImage;
     procedure MoveAvatarToCell(PlayerID, CellIdx: Integer);
+
+    procedure SeleccionarAvatar(PlayerID: Integer; const NombreJugador: string; OnComplete: TProc<Boolean>);
 
     procedure GE_OnDiceRolled(PlayerID, DiceValue: Integer);
     procedure GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);
@@ -106,6 +113,8 @@ type
     procedure EjecutarAnimacionRegla(PlayerID: Integer; const RuleType, Message: string);
     procedure Net_OnMessageReceived(const Command: string; JSONData: TJSONObject);
     procedure OnDiceFormClose(Sender: TObject; var Action: TCloseAction);
+
+    function GetBTManager: TBluetoothNetworkManager;
   end;
 
 var
@@ -113,10 +122,8 @@ var
 
 const
   AVATAR_START_OFFSET : array[0..3] of TPointF = (
-      (X:  0;  Y:  0),
-      (X: 45;  Y:  0),
-      (X:  0;  Y: 45),
-      (X: 45;  Y: 45)
+      (X:  0;  Y:  0), (X: 45;  Y:  0),
+      (X:  0;  Y: 45), (X: 45;  Y: 45)
     );
 
 implementation
@@ -124,74 +131,101 @@ implementation
 {$R *.fmx}
 
 procedure TfrmMain.FormCreate(Sender: TObject);
+var
+  RutaDB: string;
 begin
-  FIndex := 0;
-  Randomize;
-  ForceDirectories(ExtractFilePath(DB_PATH));
+  try
+    FIndex := 0;
+    Randomize;
 
-  FDB            := TDatabase.Create(DB_PATH);
-  FBoardManager  := TBoardManager.Create(ilBoards, FDB);
-  FPlayerManager := TPlayerManager.Create(ilAvatars);
-  FDemoCell      := 0;
-  FTotalPlayers  := 4;
+    RutaDB := GetDBPath;
+    ForceDirectories(ExtractFilePath(RutaDB));
+    FDB := TDatabase.Create(RutaDB);
 
-  FNextPlayerID := 2; // El Host siempre es 1, el primer invitado será el 2.
+    FBoardManager  := TBoardManager.Create(ilBoards, FDB);
+    FPlayerManager := TPlayerManager.Create(ilAvatars);
 
-  FGameEngine := TGameEngine.Create(FTotalPlayers);
-  FGameEngine.OnDiceRolled  := GE_OnDiceRolled;
-  FGameEngine.OnPlayerMoved := GE_OnPlayerMoved;
-  FGameEngine.OnTurnChanged := GE_OnTurnChanged;
-  FGameEngine.OnGameOver    := GE_OnGameOver;
-  FGameEngine.OnRuleTriggered := GE_OnRuleTriggered;
+    FDemoCell      := 0;
+    FTotalPlayers  := 4;
+    FNextPlayerID  := 2;
 
-  // Limpieza inicial
-  imgAvatar1.Visible := False;
-  imgAvatar2.Visible := False;
-  imgAvatar3.Visible := False;
-  imgAvatar4.Visible := False;
+    FGameEngine := TGameEngine.Create(FTotalPlayers);
+    FGameEngine.OnDiceRolled  := GE_OnDiceRolled;
+    FGameEngine.OnPlayerMoved := GE_OnPlayerMoved;
+    FGameEngine.OnTurnChanged := GE_OnTurnChanged;
+    FGameEngine.OnGameOver    := GE_OnGameOver;
+    FGameEngine.OnRuleTriggered := GE_OnRuleTriggered;
 
-  lblTurno.Text := 'Selecciona un tablero para iniciar';
-  lblDado.Text  := 'Dado: —';
-  if Assigned(lblCasilla) then lblCasilla.Text := '';
+    imgAvatar1.Visible := False; imgAvatar2.Visible := False;
+    imgAvatar3.Visible := False; imgAvatar4.Visible := False;
 
-  btnTirarDado.Enabled := False;
+    // ══════════════════════════════════════════════════════════════
+    // ¡NUEVO! ANCLAJE ESPACIAL (Cura las coordenadas y artefactos)
+    // ══════════════════════════════════════════════════════════════
+    imgAvatar1.Parent := imgBoard;
+    imgAvatar2.Parent := imgBoard;
+    imgAvatar3.Parent := imgBoard;
+    imgAvatar4.Parent := imgBoard;
+    if Assigned(imgWell) then imgWell.Parent := imgBoard;
+    // ══════════════════════════════════════════════════════════════
 
-  // ¡CORRECCIÓN 1! Inicializar explícitamente en -1 para liberar el bloqueo de movimiento
-  FWalkTargetCell := -1;
-  FSecondaryTargetCell := -1;
-  FWalkingPlayer := 0;
+    lblTurno.Text := 'Selecciona un tablero para iniciar';
+    lblDado.Text  := 'Dado: —';
+    if Assigned(lblCasilla) then lblCasilla.Text := '';
 
-  FTmrWalk := TTimer.Create(Self);
-  FTmrWalk.Interval := 250;
-  FTmrWalk.Enabled := False;
-  FTmrWalk.OnTimer := tmrWalkTimer;
+    btnTirarDado.Enabled := False;
+    FWalkTargetCell := -1; FSecondaryTargetCell := -1; FWalkingPlayer := 0;
 
-  FNetworkManager := TNetworkManager.Create;
-  FNetworkManager.OnMessageReceived := Net_OnMessageReceived;
+    FTmrWalk := TTimer.Create(Self);
+    FTmrWalk.Interval := 250;
+    FTmrWalk.Enabled := False;
+    FTmrWalk.OnTimer := tmrWalkTimer;
+
+    FNetworkManager := TNetworkManager.Create;
+    FNetworkManager.OnMessageReceived := Net_OnMessageReceived;
+  except
+    on E: Exception do
+      ShowMessage('Error fatal al iniciar: ' + E.Message);
+  end;
 end;
 
 procedure TfrmMain.FormDestroy(Sender: TObject);
 begin
   FNetworkManager.Free;
+  FBluetoothManager.Free;
   FGameEngine.Free;
   FBoardManager.Free;
   FPlayerManager.Free;
   FDB.Free;
 end;
 
+function TfrmMain.NetIsHost: Boolean;
+begin
+  if FUseBluetooth then Result := GetBTManager.IsHost
+  else Result := FNetworkManager.IsHost;
+end;
+
+procedure TfrmMain.NetSendCommand(const Command: string; JSONData: TJSONObject);
+begin
+  if FUseBluetooth then GetBTManager.SendCommand(Command, JSONData)
+  else FNetworkManager.SendCommand(Command, JSONData);
+end;
+
+procedure TfrmMain.NetBroadcastState(const StateJSON: string);
+begin
+  if FUseBluetooth then GetBTManager.BroadcastState(StateJSON)
+  else FNetworkManager.BroadcastState(StateJSON);
+end;
+
 procedure TfrmMain.imgBoardResize(Sender: TObject);
 begin
   if Assigned(FBoardManager) then
-  begin
-    if FBoardManager.ActiveBoardHasCoords then
-      ResetAvatarsToStart;
-  end;
+    if FBoardManager.ActiveBoardHasCoords then ResetAvatarsToStart;
 end;
 
 procedure TfrmMain.imgBoardMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Single);
 begin
-  FLastX := X;
-  FLastY := Y;
+  FLastX := X; FLastY := Y;
   lblCoords.Text := Format('X: %.1f | Y: %.1f', [X, Y]);
 end;
 
@@ -217,25 +251,16 @@ begin
     ShowMessage('Selecciona un tablero primero');
     Exit;
   end;
-  FBoardManager.StartCapture(
-    FBoardManager.ActiveBoardIdx,
-    imgBoard.Width,
-    imgBoard.Height
-  );
+  FBoardManager.StartCapture(FBoardManager.ActiveBoardIdx, imgBoard.Width, imgBoard.Height);
 
-  imgAvatar1.Visible := False;
-  imgAvatar2.Visible := False;
-  imgAvatar3.Visible := False;
-  imgAvatar4.Visible := False;
-
+  imgAvatar1.Visible := False; imgAvatar2.Visible := False;
+  imgAvatar3.Visible := False; imgAvatar4.Visible := False;
   lblCoords.Text := Format('Modo captura — Tablero %d: doble click en casilla 1/%d', [FBoardManager.ActiveBoardIdx, MAX_CELLS]);
 end;
 
 procedure TfrmMain.btnRulesClick(Sender: TObject);
 begin
-  if not Assigned(frmRules) then
-    frmRules := TfrmRules.Create(Application);
-
+  if not Assigned(frmRules) then frmRules := TfrmRules.Create(Application);
   frmRules.CargarReglas(FBoardManager.ActiveBoardIdx);
   frmRules.Show;
 end;
@@ -244,22 +269,23 @@ procedure TfrmMain.btnStartGameClick(Sender: TObject);
 var
   frmLobby: TfrmLobby;
   frmBoard: TfrmBoardSelect;
-  arrInput: TArray<string>;
   numPlayers, i: Integer;
+  json: TJSONObject;
 begin
   frmLobby := TfrmLobby.Create(Application);
+
+  // ══════════════════════════════════════════════════════════════
+  // BLOQUE WINDOWS: Seguro, Síncrono y tradicional
+  // ══════════════════════════════════════════════════════════════
+  {$IF DEFINED(MSWINDOWS)}
   try
     if frmLobby.ShowModal = mrOk then
     begin
       FPlayerName := frmLobby.PlayerName;
+      FUseBluetooth := frmLobby.UseBluetooth;
 
       if frmLobby.IsHost then
       begin
-        // ════════════════ FLUJO DEL HOST ════════════════
-        FNetworkManager.StartAsHost(7777);
-        FLocalPlayerID := 1;
-        FMyClientToken := 'HOST';
-
         frmBoard := TfrmBoardSelect.CreateWithImages(Application, ilBoards);
         try
           if frmBoard.ShowModal = mrOk then
@@ -272,10 +298,7 @@ begin
           frmBoard.Free;
         end;
 
-        SetLength(arrInput, 1); arrInput[0] := '2';
-        if not TDialogServiceSync.InputQuery('Host', ['Jugadores totales (2-4):'], arrInput) then Exit;
-        numPlayers := StrToIntDef(arrInput[0], 0);
-
+        numPlayers := frmLobby.SelectedNumber;
         FTotalPlayers := numPlayers;
         FGameEngine.TotalPlayers := numPlayers;
 
@@ -287,66 +310,200 @@ begin
            FPlayerManager.LoadAvatarIntoImage(1, GetAvatarImage(i));
         end;
 
-        SeleccionarAvatar(1, FPlayerName);
+        SeleccionarAvatar(1, FPlayerName, nil);
+
+        if FUseBluetooth then GetBTManager.StartAsHost
+        else FNetworkManager.StartAsHost(7777);
+
+        FLocalPlayerID := 1;
+        FMyClientToken := 'HOST';
 
         ResetAvatarsToStart;
         FGameEngine.StartGame;
         btnTirarDado.Enabled := True;
 
-        ShowMessage('¡Servidor Abierto! Tu IP es: ' + FNetworkManager.GetLocalIP);
+        if FUseBluetooth then ShowMessage('¡Servidor Bluetooth Abierto!')
+        else ShowMessage('¡Servidor Abierto! Tu IP es: ' + FNetworkManager.GetLocalIP);
       end
       else
       begin
-        // ════════════════ FLUJO DEL CLIENTE ════════════════
-        FLocalPlayerID := 0; // Desconocido. El host lo asignará.
-        FMyClientToken := IntToStr(Random(9999999)); // Etiqueta de seguridad
+        FLocalPlayerID := 0;
+        FMyClientToken := IntToStr(Random(9999999));
 
-        lblTurno.Text := 'Conectando a ' + frmLobby.HostIP + '...';
-
-        FNetworkManager.ConnectToHost(frmLobby.HostIP, 7777);
-
-        // Pedimos al host que nos asigne un asiento enviando nuestro token
-        var json := TJSONObject.Create;
-        json.AddPair('token', FMyClientToken);
-        json.AddPair('name', FPlayerName);
-        FNetworkManager.SendCommand('JOIN_REQUEST', json);
+        if FUseBluetooth then
+        begin
+          lblTurno.Text := 'Conectando por Bluetooth a ' + frmLobby.BluetoothDeviceName + '...';
+          TThread.CreateAnonymousThread(procedure
+          begin
+            try
+              GetBTManager.ConnectToDevice(frmLobby.BluetoothDeviceName);
+              TThread.Queue(nil, procedure
+              begin
+                json := TJSONObject.Create;
+                json.AddPair('token', FMyClientToken);
+                json.AddPair('name', FPlayerName);
+                NetSendCommand('JOIN_REQUEST', json);
+                json.Free;
+              end);
+            except
+              TThread.Queue(nil, procedure begin ShowMessage('Error de conexión Bluetooth.'); end);
+            end;
+          end).Start;
+        end
+        else
+        begin
+          lblTurno.Text := 'Conectando a ' + frmLobby.HostIP + '...';
+          TThread.CreateAnonymousThread(procedure
+          begin
+            try
+              FNetworkManager.ConnectToHost(frmLobby.HostIP, 7777);
+              TThread.Queue(nil, procedure
+              begin
+                json := TJSONObject.Create;
+                json.AddPair('token', FMyClientToken);
+                json.AddPair('name', FPlayerName);
+                NetSendCommand('JOIN_REQUEST', json);
+                json.Free;
+              end);
+            except
+              TThread.Queue(nil, procedure begin ShowMessage('Error de conexión LAN.'); end);
+            end;
+          end).Start;
+        end;
       end;
     end;
   finally
     frmLobby.Free;
   end;
+
+  // ══════════════════════════════════════════════════════════════
+  // BLOQUE ANDROID/MÓVILES: Asíncrono puro (Obligatorio para evitar bloqueos)
+  // ══════════════════════════════════════════════════════════════
+  {$ELSE}
+  frmLobby.ShowModal(
+    procedure(LobbyResult: TModalResult)
+    begin
+      if LobbyResult = mrOk then
+      begin
+        FPlayerName := frmLobby.PlayerName;
+        FUseBluetooth := frmLobby.UseBluetooth;
+
+        if frmLobby.IsHost then
+        begin
+          frmBoard := TfrmBoardSelect.CreateWithImages(Application, ilBoards);
+          frmBoard.ShowModal(
+            procedure(BoardResult: TModalResult)
+            begin
+              if BoardResult = mrOk then
+              begin
+                FBoardManager.LoadBoardIntoImage(frmBoard.SelectedIdx, imgBoard);
+                FBoardManager.SetActiveBoard(frmBoard.SelectedIdx);
+                FGameEngine.BoardIndex := frmBoard.SelectedIdx;
+
+                numPlayers := frmLobby.SelectedNumber;
+                FTotalPlayers := numPlayers;
+                FGameEngine.TotalPlayers := numPlayers;
+
+                FPlayerManager.ResetTakenAvatars;
+                FPlayerManager.MarkAvatarTaken(BLANK_IDX);
+                for i := 1 to 4 do
+                begin
+                   GetAvatarImage(i).Visible := False;
+                   FPlayerManager.LoadAvatarIntoImage(1, GetAvatarImage(i));
+                end;
+
+                SeleccionarAvatar(1, FPlayerName, procedure(Success: Boolean)
+                begin
+                  if Success then
+                  begin
+                    if FUseBluetooth then GetBTManager.StartAsHost
+                    else FNetworkManager.StartAsHost(7777);
+
+                    FLocalPlayerID := 1;
+                    FMyClientToken := 'HOST';
+
+                    ResetAvatarsToStart;
+                    FGameEngine.StartGame;
+                    btnTirarDado.Enabled := True;
+
+                    if FUseBluetooth then ShowMessage('¡Servidor Bluetooth Abierto!')
+                    else ShowMessage('¡Servidor Abierto! Tu IP es: ' + FNetworkManager.GetLocalIP);
+                  end;
+                end);
+              end;
+              frmBoard.DisposeOf;
+            end
+          );
+        end
+        else
+        begin
+          FLocalPlayerID := 0;
+          FMyClientToken := IntToStr(Random(9999999));
+
+          if FUseBluetooth then
+          begin
+            lblTurno.Text := 'Conectando por Bluetooth a ' + frmLobby.BluetoothDeviceName + '...';
+            TThread.CreateAnonymousThread(procedure
+            begin
+              try
+                GetBTManager.ConnectToDevice(frmLobby.BluetoothDeviceName);
+                TThread.Queue(nil, procedure
+                begin
+                  json := TJSONObject.Create;
+                  json.AddPair('token', FMyClientToken);
+                  json.AddPair('name', FPlayerName);
+                  NetSendCommand('JOIN_REQUEST', json);
+                  json.Free;
+                end);
+              except
+              end;
+            end).Start;
+          end
+          else
+          begin
+            lblTurno.Text := 'Conectando a ' + frmLobby.HostIP + '...';
+            TThread.CreateAnonymousThread(procedure
+            begin
+              try
+                FNetworkManager.ConnectToHost(frmLobby.HostIP, 7777);
+                TThread.Queue(nil, procedure
+                begin
+                  json := TJSONObject.Create;
+                  json.AddPair('token', FMyClientToken);
+                  json.AddPair('name', FPlayerName);
+                  NetSendCommand('JOIN_REQUEST', json);
+                  json.Free;
+                end);
+              except
+              end;
+            end).Start;
+          end;
+        end;
+      end;
+      frmLobby.DisposeOf;
+    end
+  );
+  {$ENDIF}
 end;
 
 function TfrmMain.GetAvatarImage(PlayerID: Integer): TImage;
 begin
   case PlayerID of
-    1: Result := imgAvatar1;
-    2: Result := imgAvatar2;
-    3: Result := imgAvatar3;
-    4: Result := imgAvatar4;
-  else
-    Result := imgAvatar1;
+    1: Result := imgAvatar1; 2: Result := imgAvatar2;
+    3: Result := imgAvatar3; 4: Result := imgAvatar4;
+  else Result := imgAvatar1;
   end;
 end;
 
 procedure TfrmMain.MoveAvatarToCell(PlayerID, CellIdx: Integer);
-var
-  pt  : TPointF;
-  img : TImage;
+var pt: TPointF; img: TImage;
 begin
   pt  := FBoardManager.GetCellPosition(CellIdx, imgBoard.Width, imgBoard.Height);
   img := GetAvatarImage(PlayerID);
 
-  img.Position.X := pt.X;
-  img.Position.Y := pt.Y;
-
-  img.Opacity := 1.0;
-  img.Scale.X := 1.0;
-  img.Scale.Y := 1.0;
-  img.RotationAngle := 0;
-
-  img.Visible    := True;
-  img.BringToFront;
+  img.Position.X := pt.X; img.Position.Y := pt.Y;
+  img.Opacity := 1.0; img.Scale.X := 1.0; img.Scale.Y := 1.0;
+  img.RotationAngle := 0; img.Visible := True; img.BringToFront;
 end;
 
 procedure TfrmMain.ResetAvatarsToStart;
@@ -357,10 +514,8 @@ var
 begin
   for i := 1 to 4 do FVisualPositions[i] := 0;
 
-  avatars[0] := imgAvatar1;
-  avatars[1] := imgAvatar2;
-  avatars[2] := imgAvatar3;
-  avatars[3] := imgAvatar4;
+  avatars[0] := imgAvatar1; avatars[1] := imgAvatar2;
+  avatars[2] := imgAvatar3; avatars[3] := imgAvatar4;
 
   if not FBoardManager.ActiveBoardHasCoords then
   begin
@@ -368,9 +523,7 @@ begin
     Exit;
   end;
 
-  // Restaurar el Pozo
-  if Assigned(imgWell)
-  then imgWell.Visible := True;
+  if Assigned(imgWell) then imgWell.Visible := True;
 
   basePos := FBoardManager.GetCellPosition(0, imgBoard.Width, imgBoard.Height);
 
@@ -382,62 +535,96 @@ begin
       avatars[i].Position.Y := basePos.Y + AVATAR_START_OFFSET[i].Y;
       avatars[i].Visible    := True;
     end
-    else
-      avatars[i].Visible := False;
+    else avatars[i].Visible := False;
   end;
 end;
 
-function TfrmMain.SeleccionarAvatar(PlayerID: Integer; const NombreJugador: string): Boolean;
+procedure TfrmMain.SeleccionarAvatar(PlayerID: Integer; const NombreJugador: string; OnComplete: TProc<Boolean>);
 var
   frm : TfrmAvatarSelect;
   idx : Integer;
   imgDestino : TImage;
+  json: TJSONObject;
 begin
-  Result := False;
-  frm := TfrmAvatarSelect.CreateForPlayer(
-            Application, ilAvatars,
-            FPlayerManager.GetTakenArray,
-            NombreJugador);
+  frm := TfrmAvatarSelect.CreateForPlayer(Application, ilAvatars, FPlayerManager.GetTakenArray, NombreJugador);
+
+  {$IF DEFINED(MSWINDOWS)}
+  // ════════ WINDOWS ════════
   try
     if frm.ShowModal = mrOk then
     begin
       idx := frm.SelectedIdx;
-
       if idx > 0 then
       begin
         FPlayerManager.MarkAvatarTaken(idx);
-
         imgDestino := GetAvatarImage(PlayerID);
         FPlayerManager.LoadAvatarIntoImage(idx, imgDestino);
-
         imgDestino.Tag := idx;
-
-        // ¡CORRECCIÓN 3! Tamaño a 86x86
         imgDestino.Width := 86;
         imgDestino.Height := 86;
-
         imgDestino.Visible := True;
 
         FGameEngine.PlayerAvatars[PlayerID] := idx;
 
-        if Assigned(FNetworkManager) then
-        begin
-          var json := TJSONObject.Create;
-          json.AddPair('player', TJSONNumber.Create(PlayerID));
-          json.AddPair('avatar', TJSONNumber.Create(idx));
-          FNetworkManager.SendCommand('SYNC_AVATAR', json);
-        end;
+        json := TJSONObject.Create;
+        json.AddPair('player', TJSONNumber.Create(PlayerID));
+        json.AddPair('avatar', TJSONNumber.Create(idx));
+        NetSendCommand('SYNC_AVATAR', json);
+        json.Free;
 
-        Result := True;
+        if Assigned(OnComplete) then OnComplete(True);
       end
       else
       begin
         ShowMessage('El avatar en blanco no es seleccionable.');
+        if Assigned(OnComplete) then OnComplete(False);
       end;
-    end;
+    end
+    else
+      if Assigned(OnComplete) then OnComplete(False);
   finally
     frm.Free;
   end;
+  {$ELSE}
+  // ════════ ANDROID ════════
+  frm.ShowModal(
+    procedure(ModalResult: TModalResult)
+    begin
+      if ModalResult = mrOk then
+      begin
+        idx := frm.SelectedIdx;
+        if idx > 0 then
+        begin
+          FPlayerManager.MarkAvatarTaken(idx);
+          imgDestino := GetAvatarImage(PlayerID);
+          FPlayerManager.LoadAvatarIntoImage(idx, imgDestino);
+          imgDestino.Tag := idx;
+          imgDestino.Width := 86;
+          imgDestino.Height := 86;
+          imgDestino.Visible := True;
+
+          FGameEngine.PlayerAvatars[PlayerID] := idx;
+
+          json := TJSONObject.Create;
+          json.AddPair('player', TJSONNumber.Create(PlayerID));
+          json.AddPair('avatar', TJSONNumber.Create(idx));
+          NetSendCommand('SYNC_AVATAR', json);
+          json.Free;
+
+          if Assigned(OnComplete) then OnComplete(True);
+        end
+        else
+        begin
+          ShowMessage('El avatar en blanco no es seleccionable.');
+          if Assigned(OnComplete) then OnComplete(False);
+        end;
+      end
+      else
+        if Assigned(OnComplete) then OnComplete(False);
+      frm.DisposeOf;
+    end
+  );
+  {$ENDIF}
 end;
 
 procedure TfrmMain.btnTirarDadoClick(Sender: TObject);
@@ -447,17 +634,16 @@ begin
 
   btnTirarDado.Enabled := False;
 
-  if FNetworkManager.IsHost then
+  if NetIsHost then
   begin
     json := TJSONObject.Create;
     json.AddPair('player', TJSONNumber.Create(FGameEngine.GetCurrentPlayer));
     json.AddPair('dice', TJSONNumber.Create(Random(6) + 1));
-    FNetworkManager.SendCommand('SYNC_ROLL', json);
+    NetSendCommand('SYNC_ROLL', json);
+    json.Free;
   end
   else
-  begin
-    FNetworkManager.SendCommand('ROLL_REQUEST');
-  end;
+    NetSendCommand('ROLL_REQUEST');
 end;
 
 procedure TfrmMain.tmrWalkTimer(Sender: TObject);
@@ -486,7 +672,7 @@ begin
         TThread.CreateAnonymousThread(procedure
           begin
             Sleep(1200);
-            TThread.Synchronize(TThread(nil), procedure
+            TThread.Queue(nil, procedure
               begin
                 FTmrWalk.Enabled := True;
               end);
@@ -494,20 +680,14 @@ begin
       end
     else
       begin
-          // Limpiamos el objetivo para el siguiente turno
           FWalkTargetCell := -1;
-
           if FGameEngine.GameActive and (FGameEngine.GetCurrentPlayer = FLocalPlayerID)
           then btnTirarDado.Enabled := True;
       end;
-
     Exit;
   end;
 
-  if FVisualPositions[FWalkingPlayer] < FWalkTargetCell then
-    step := 1
-  else
-    step := -1;
+  if FVisualPositions[FWalkingPlayer] < FWalkTargetCell then step := 1 else step := -1;
 
   FVisualPositions[FWalkingPlayer] := FVisualPositions[FWalkingPlayer] + step;
   pt := FBoardManager.GetCellPosition(FVisualPositions[FWalkingPlayer], imgBoard.Width, imgBoard.Height);
@@ -517,8 +697,7 @@ begin
 end;
 
 procedure TfrmMain.EjecutarAnimacionRegla(PlayerID: Integer; const RuleType, Message: string);
-var
-  imgPlayer: TImage;
+var imgPlayer: TImage; ptAbs, ptLoc: TPointF;
 begin
   imgPlayer := GetAvatarImage(PlayerID);
   imgPlayer.BringToFront;
@@ -529,7 +708,6 @@ begin
     rctnglSpecialEvent.Opacity := 1.0;
     rctnglSpecialEvent.Visible := True;
     rctnglSpecialEvent.BringToFront;
-
     TAnimator.AnimateFloat(rctnglSpecialEvent, 'Opacity', 0.0, 4.0);
   end;
 
@@ -537,13 +715,11 @@ begin
   begin
     if Assigned(imgWell) then
     begin
-      var ptAbs, ptLoc: TPointF;
       ptAbs := imgWell.LocalToAbsolute(TPointF.Create(imgWell.Width / 2, imgWell.Height / 2));
       ptLoc := (imgPlayer.Parent as TControl).AbsoluteToLocal(ptAbs);
 
       TAnimator.AnimateFloat(imgPlayer, 'Position.X', ptLoc.X - (imgPlayer.Width / 2), 1.0);
       TAnimator.AnimateFloat(imgPlayer, 'Position.Y', ptLoc.Y - (imgPlayer.Height / 2), 1.0);
-
       TAnimator.AnimateFloat(imgPlayer, 'RotationAngle', 1080, 2.0);
       TAnimator.AnimateFloat(imgPlayer, 'Scale.X', 0.1, 2.0);
       TAnimator.AnimateFloat(imgPlayer, 'Scale.Y', 0.1, 2.0);
@@ -558,13 +734,6 @@ begin
     TAnimator.AnimateFloatDelay(imgPlayer, 'Position.Y', imgPlayer.Position.Y + 800, 1.0, 0.3);
     TAnimator.AnimateFloatDelay(imgPlayer, 'Opacity', 0.0, 0.5, 0.3);
     FVisualPositions[PlayerID] := 0;
-  end
-  else if RuleType = 'GOOSE' then
-  begin
-    TAnimator.AnimateFloat(imgPlayer, 'Scale.X', 1.8, 0.3);
-    TAnimator.AnimateFloat(imgPlayer, 'Scale.Y', 1.8, 0.3);
-    TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.X', 1.0, 0.3, 0.4);
-    TAnimator.AnimateFloatDelay(imgPlayer, 'Scale.Y', 1.0, 0.3, 0.4);
   end
   else if RuleType = 'MAZE' then
   begin
@@ -598,57 +767,38 @@ begin
   end;
 end;
 
-// 1. EL NUEVO MÉTODO QUE ESCUCHA CUANDO EL DADO SE CIERRA
 procedure TfrmMain.OnDiceFormClose(Sender: TObject; var Action: TCloseAction);
 begin
-  Action := TCloseAction.caFree; // Libera la memoria del dado
+  Action := TCloseAction.caFree;
   FDiceIsRolling := False;
-
-  // ¡El dado ya desapareció! Si el pato estaba esperando para moverse, lo soltamos:
-  if (FWalkingPlayer > 0) and (FWalkTargetCell <> -1) then
-    FTmrWalk.Enabled := True;
+  if (FWalkingPlayer > 0) and (FWalkTargetCell <> -1) then FTmrWalk.Enabled := True;
 end;
 
-// 2. ACTUALIZAR EL TIRADO DE DADO
 procedure TfrmMain.GE_OnDiceRolled(PlayerID, DiceValue: Integer);
-var
-  frmDice: TfrmDice;
+var frmDice: TfrmDice;
 begin
-  FDiceIsRolling := True; // Levantamos la bandera: ¡Nadie camina!
+  FDiceIsRolling := True;
   frmDice := TfrmDice.CreateWithResult(Application, ilDiceFaces, DiceValue);
-  frmDice.OnClose := OnDiceFormClose; // Conectamos la oreja al evento de cierre
+  frmDice.OnClose := OnDiceFormClose;
   frmDice.Show;
   lblDado.Text := Format('J%d tiró: %d', [PlayerID, DiceValue]);
 end;
 
-// 3. ACTUALIZAR EL MOVIMIENTO DEL JUGADOR
 procedure TfrmMain.GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);
-var
-  img: TImage;
+var img: TImage;
 begin
   img := GetAvatarImage(PlayerID);
-  img.Opacity := 1.0;
-  img.Scale.X := 1.0;
-  img.Scale.Y := 1.0;
-  img.RotationAngle := 0;
-  img.Visible := True;
-  img.BringToFront;
+  img.Opacity := 1.0; img.Scale.X := 1.0; img.Scale.Y := 1.0;
+  img.RotationAngle := 0; img.Visible := True; img.BringToFront;
 
-  // Si ya había un destino programado, lo mandamos a la cola secundaria
   if FWalkTargetCell <> -1 then
-  begin
-    FSecondaryTargetCell := NewCellIdx;
-  end
+    FSecondaryTargetCell := NewCellIdx
   else
   begin
-    // Es el primer movimiento del turno
     FWalkingPlayer := PlayerID;
     FWalkTargetCell := NewCellIdx;
     FSecondaryTargetCell := -1;
-
-    // ¡SOLO EMPEZAMOS A CAMINAR SI EL DADO YA NO ESTÁ GIRANDO!
-    if not FDiceIsRolling then
-      FTmrWalk.Enabled := True;
+    if not FDiceIsRolling then FTmrWalk.Enabled := True;
   end;
 end;
 
@@ -662,13 +812,11 @@ end;
 procedure TfrmMain.GE_OnTurnChanged(NewPlayerID: Integer);
 begin
   lblTurno.Text := Format('Turno: Jugador %d', [NewPlayerID]);
-
   if NewPlayerID = FLocalPlayerID then
   begin
     rctnglSidebar.Fill.Color := TAlphaColorRec.Limegreen;
     lblTurno.Text := '¡ES TU TURNO!';
-    if not FTmrWalk.Enabled and FGameEngine.GameActive then
-      btnTirarDado.Enabled := True;
+    if not FTmrWalk.Enabled and FGameEngine.GameActive then btnTirarDado.Enabled := True;
   end
   else
   begin
@@ -685,7 +833,7 @@ begin
   TThread.CreateAnonymousThread(procedure
     begin
       Sleep(2000);
-      TThread.Synchronize(TThread(nil), procedure
+      TThread.Queue(nil, procedure
         begin
           ShowMessage(Format('¡Felicidades! ¡El Jugador %d ganó la partida!', [WinnerID]));
         end);
@@ -701,31 +849,28 @@ var
 begin
   if Command = 'JOIN_REQUEST' then
   begin
-    // El host procesa a los nuevos invitados y les asigna asiento
-    if FNetworkManager.IsHost then
+    if NetIsHost then
     begin
       if FNextPlayerID <= FTotalPlayers then
       begin
         json := TJSONObject.Create;
         json.AddPair('assigned_id', TJSONNumber.Create(FNextPlayerID));
-        json.AddPair('token', JSONData.GetValue<string>('token')); // Rebotar el token de seguridad
-        FNetworkManager.SendCommand('JOIN_ACCEPTED', json);
+        json.AddPair('token', JSONData.GetValue<string>('token'));
+        NetSendCommand('JOIN_ACCEPTED', json);
+        json.Free;
         Inc(FNextPlayerID);
       end;
     end;
   end
   else if Command = 'JOIN_ACCEPTED' then
   begin
-    // El cliente verifica si ese asiento es para él usando su token único
-    if (not FNetworkManager.IsHost) and (FLocalPlayerID = 0) then
+    if (not NetIsHost) and (FLocalPlayerID = 0) then
     begin
       if JSONData.GetValue<string>('token') = FMyClientToken then
       begin
         FLocalPlayerID := JSONData.GetValue<Integer>('assigned_id');
         lblTurno.Text := 'Esperando sincronización...';
-
-        // Ya tengo mi ID, ahora pido ver el tablero de los demás
-        FNetworkManager.SendCommand('SYNC_ALL_REQUEST');
+        NetSendCommand('SYNC_ALL_REQUEST');
       end;
     end;
   end
@@ -741,7 +886,6 @@ begin
         FBoardManager.SetActiveBoard(FGameEngine.BoardIndex);
       end;
 
-      // ¡CORRECCIÓN 2! Mostrar explícitamente el pozo para los clientes
       if Assigned(imgWell) then imgWell.Visible := True;
 
       for i := 1 to 4 do
@@ -752,11 +896,8 @@ begin
           FPlayerManager.MarkAvatarTaken(avIdx);
           FPlayerManager.LoadAvatarIntoImage(avIdx, GetAvatarImage(i));
           GetAvatarImage(i).Tag := avIdx;
-
-          // ¡CORRECCIÓN 3! Tamaño a 86x86
           GetAvatarImage(i).Width := 86;
           GetAvatarImage(i).Height := 86;
-
           GetAvatarImage(i).Visible := True;
         end;
       end;
@@ -767,9 +908,7 @@ begin
         pt := FBoardManager.GetCellPosition(pos, imgBoard.Width, imgBoard.Height);
         img := GetAvatarImage(i);
 
-        img.Opacity := 1.0;
-        img.Scale.X := 1.0;
-        img.Scale.Y := 1.0;
+        img.Opacity := 1.0; img.Scale.X := 1.0; img.Scale.Y := 1.0;
 
         if pos = 0 then
         begin
@@ -778,21 +917,17 @@ begin
         end
         else
         begin
-           img.Position.X := pt.X;
-           img.Position.Y := pt.Y;
+           img.Position.X := pt.X; img.Position.Y := pt.Y;
         end;
-        img.Visible := True;
-        img.BringToFront;
+        img.Visible := True; img.BringToFront;
       end;
 
-      // Si soy el cliente nuevo y acabo de cargar el tablero ajeno, ¡es hora de elegir mi Pato!
-      if (not FNetworkManager.IsHost) and (FLocalPlayerID > 0) and (FGameEngine.PlayerAvatars[FLocalPlayerID] = 0) then
+      if (not NetIsHost) and (FLocalPlayerID > 0) and (FGameEngine.PlayerAvatars[FLocalPlayerID] = 0) then
       begin
-         SeleccionarAvatar(FLocalPlayerID, FPlayerName);
+         SeleccionarAvatar(FLocalPlayerID, FPlayerName, nil);
       end;
 
-      if not FGameEngine.GameActive then
-        FGameEngine.StartGame;
+      if not FGameEngine.GameActive then FGameEngine.StartGame;
     end;
   end
   else if Command = 'SYNC_ROLL' then
@@ -804,12 +939,13 @@ begin
       FGameEngine.TryRollDice(pID, dVal);
     end;
   end
-  else if (Command = 'ROLL_REQUEST') and FNetworkManager.IsHost then
+  else if (Command = 'ROLL_REQUEST') and NetIsHost then
   begin
     json := TJSONObject.Create;
     json.AddPair('player', TJSONNumber.Create(FGameEngine.GetCurrentPlayer));
     json.AddPair('dice', TJSONNumber.Create(Random(6) + 1));
-    FNetworkManager.SendCommand('SYNC_ROLL', json);
+    NetSendCommand('SYNC_ROLL', json);
+    json.Free;
   end
   else if Command = 'SYNC_AVATAR' then
   begin
@@ -823,18 +959,25 @@ begin
       FPlayerManager.LoadAvatarIntoImage(avIdx, GetAvatarImage(pID));
 
       GetAvatarImage(pID).Tag := avIdx;
-
-      // ¡CORRECCIÓN 3! Tamaño a 86x86
       GetAvatarImage(pID).Width := 86;
       GetAvatarImage(pID).Height := 86;
-
       GetAvatarImage(pID).Visible := True;
     end;
   end
-  else if (Command = 'SYNC_ALL_REQUEST') and FNetworkManager.IsHost then
+  else if (Command = 'SYNC_ALL_REQUEST') and NetIsHost then
   begin
-    FNetworkManager.BroadcastState(FGameEngine.ExportStateToJSON);
+    NetBroadcastState(FGameEngine.ExportStateToJSON);
   end;
+end;
+
+function TfrmMain.GetBTManager: TBluetoothNetworkManager;
+begin
+  if not Assigned(FBluetoothManager) then
+  begin
+    FBluetoothManager := TBluetoothNetworkManager.Create;
+    FBluetoothManager.OnMessageReceived := Net_OnMessageReceived;
+  end;
+  Result := FBluetoothManager;
 end;
 
 end.
