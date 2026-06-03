@@ -3,11 +3,12 @@
 interface
 
 uses
+  // ¡Asegúrate de que System.IOUtils esté aquí para que no marque error en 'Combine'!
   System.SysUtils, System.Types, System.UITypes, System.Classes, System.Variants,
   System.IOUtils,
   FMX.Types, FMX.Controls, FMX.Forms, FMX.Graphics, FMX.Dialogs,
   FMX.Controls.Presentation, FMX.StdCtrls, FMX.Objects, FMX.Layouts,
-  System.ImageList, FMX.ImgList, System.JSON, FMX.Ani,
+  System.ImageList, FMX.ImgList, System.JSON, FMX.Ani, FMX.DialogService,
   FireDAC.Phys.SQLite,
   FireDAC.Phys.SQLiteWrapper.Stat,
   uTypes,
@@ -23,7 +24,9 @@ uses
   fRulesForm,
   fLobbyForm,
   uNetworkManager,
-  uBluetoothManager;
+  uBluetoothManager,
+  fAdminLogin,
+  uSaveManager;
 
 type
   TfrmMain = class(TForm)
@@ -37,6 +40,15 @@ type
     imgAvatar4: TImage;
     btnTirarDado: TButton;
     btnCapturar: TButton;
+
+    // Botones de Fase 8 y 9
+    btnGuardar: TButton;
+    btnCargar: TButton;
+    btnReiniciar: TButton;
+    btnPausar: TButton;
+    btnReanudar: TButton; // <-- ¡Tu nuevo botón agregado!
+    btnMenuPrincipal: TButton;
+
     lytButtons: TLayout;
     rctnglSidebar: TRectangle;
     lblTurno: TLabel;
@@ -60,6 +72,15 @@ type
     procedure imgBoardResize(Sender: TObject);
     procedure btnStartGameClick(Sender: TObject);
     procedure btnRulesClick(Sender: TObject);
+
+    // Eventos Fase 8 y 9
+    procedure btnGuardarClick(Sender: TObject);
+    procedure btnCargarClick(Sender: TObject);
+    procedure btnReiniciarClick(Sender: TObject);
+    procedure btnPausarClick(Sender: TObject);
+    procedure btnReanudarClick(Sender: TObject); // <-- ¡Evento para reanudar!
+    procedure btnMenuPrincipalClick(Sender: TObject);
+
   private
     FIndex: Integer;
     FLastX  : Single;
@@ -92,6 +113,7 @@ type
     FPendingRulePlayer: Integer;
 
     FDiceIsRolling: Boolean;
+    FPartidaPausada: Boolean;
 
     function NetIsHost: Boolean;
     procedure NetSendCommand(const Command: string; JSONData: TJSONObject = nil);
@@ -100,6 +122,8 @@ type
     procedure ResetAvatarsToStart;
     function  GetAvatarImage(PlayerID: Integer): TImage;
     procedure MoveAvatarToCell(PlayerID, CellIdx: Integer);
+
+    procedure RestaurarVisualesDesdeMotor;
 
     procedure SeleccionarAvatar(PlayerID: Integer; const NombreJugador: string; OnComplete: TProc<Boolean>);
 
@@ -135,8 +159,8 @@ var
   RutaDB: string;
 begin
   try
-    FIndex := 0;
-    Randomize;
+    FIndex := 0; Randomize;
+    FPartidaPausada := False;
 
     RutaDB := GetDBPath;
     ForceDirectories(ExtractFilePath(RutaDB));
@@ -145,9 +169,7 @@ begin
     FBoardManager  := TBoardManager.Create(ilBoards, FDB);
     FPlayerManager := TPlayerManager.Create(ilAvatars);
 
-    FDemoCell      := 0;
-    FTotalPlayers  := 4;
-    FNextPlayerID  := 2;
+    FDemoCell := 0; FTotalPlayers := 4; FNextPlayerID := 2;
 
     FGameEngine := TGameEngine.Create(FTotalPlayers);
     FGameEngine.OnDiceRolled  := GE_OnDiceRolled;
@@ -159,15 +181,9 @@ begin
     imgAvatar1.Visible := False; imgAvatar2.Visible := False;
     imgAvatar3.Visible := False; imgAvatar4.Visible := False;
 
-    // ══════════════════════════════════════════════════════════════
-    // ¡NUEVO! ANCLAJE ESPACIAL (Cura las coordenadas y artefactos)
-    // ══════════════════════════════════════════════════════════════
-    imgAvatar1.Parent := imgBoard;
-    imgAvatar2.Parent := imgBoard;
-    imgAvatar3.Parent := imgBoard;
-    imgAvatar4.Parent := imgBoard;
+    imgAvatar1.Parent := imgBoard; imgAvatar2.Parent := imgBoard;
+    imgAvatar3.Parent := imgBoard; imgAvatar4.Parent := imgBoard;
     if Assigned(imgWell) then imgWell.Parent := imgBoard;
-    // ══════════════════════════════════════════════════════════════
 
     lblTurno.Text := 'Selecciona un tablero para iniciar';
     lblDado.Text  := 'Dado: —';
@@ -183,9 +199,38 @@ begin
 
     FNetworkManager := TNetworkManager.Create;
     FNetworkManager.OnMessageReceived := Net_OnMessageReceived;
+
+    // Configuración inicial de los botones de Pausa
+    if Assigned(btnPausar) then btnPausar.Visible := True;
+    if Assigned(btnReanudar) then btnReanudar.Visible := False;
+
+    // --- CONTINUAR PARTIDA AUTOMÁTICA ---
+    if TSaveManager.HayPartidaGuardada(FDB) then
+    begin
+      TDialogService.MessageDialog('Se encontró una partida guardada. ¿Deseas continuarla?',
+        System.UITypes.TMsgDlgType.mtConfirmation,
+        [System.UITypes.TMsgDlgBtn.mbYes, System.UITypes.TMsgDlgBtn.mbNo],
+        System.UITypes.TMsgDlgBtn.mbYes, 0,
+        procedure(const AResult: TModalResult)
+        begin
+          if AResult = mrYes then
+          begin
+            if TSaveManager.CargarPartida(FGameEngine, FDB) then
+            begin
+              FTotalPlayers := FGameEngine.TotalPlayers;
+              FLocalPlayerID := 1;
+              RestaurarVisualesDesdeMotor;
+              btnTirarDado.Enabled := True;
+              ShowMessage('Partida recuperada exitosamente.');
+            end;
+          end
+          else
+            TSaveManager.BorrarPartida(FDB);
+        end);
+    end;
+
   except
-    on E: Exception do
-      ShowMessage('Error fatal al iniciar: ' + E.Message);
+    on E: Exception do ShowMessage('Error fatal al iniciar: ' + E.Message);
   end;
 end;
 
@@ -217,10 +262,190 @@ begin
   else FNetworkManager.BroadcastState(StateJSON);
 end;
 
+// ════════════════════════════════════════════════════════════════
+// FASE 8 Y 9: SISTEMA DE GUARDADO, CARGA, PAUSA Y REINICIO
+// ════════════════════════════════════════════════════════════════
+procedure TfrmMain.btnGuardarClick(Sender: TObject);
+begin
+  if not FGameEngine.GameActive then
+  begin
+    ShowMessage('Inicia una partida primero para poder guardarla.');
+    Exit;
+  end;
+
+  if not NetIsHost then
+  begin
+    ShowMessage('Solo el Anfitrión (Host) puede guardar la partida en el servidor.');
+    Exit;
+  end;
+
+  TSaveManager.GuardarPartida(FGameEngine, FDB);
+  ShowMessage('¡Partida guardada exitosamente en la base de datos!');
+end;
+
+procedure TfrmMain.btnCargarClick(Sender: TObject);
+begin
+  if not NetIsHost then
+  begin
+    ShowMessage('Solo el Anfitrión (Host) puede cargar una partida.');
+    Exit;
+  end;
+
+  if TSaveManager.HayPartidaGuardada(FDB) then
+  begin
+    if TSaveManager.CargarPartida(FGameEngine, FDB) then
+    begin
+      FTotalPlayers := FGameEngine.TotalPlayers;
+      RestaurarVisualesDesdeMotor;
+      NetBroadcastState(FGameEngine.ExportStateToJSON);
+      ShowMessage('¡Partida cargada y sincronizada con todos los jugadores!');
+    end;
+  end
+  else
+    ShowMessage('No se encontró ninguna partida guardada en la base de datos.');
+end;
+
+procedure TfrmMain.btnReiniciarClick(Sender: TObject);
+begin
+  if not FGameEngine.GameActive then Exit;
+
+  if not NetIsHost then
+  begin
+    ShowMessage('Solo el Anfitrión (Host) puede reiniciar la partida.');
+    Exit;
+  end;
+
+  TSaveManager.BorrarPartida(FDB);
+  FGameEngine.ResetGame;
+  RestaurarVisualesDesdeMotor;
+  NetBroadcastState(FGameEngine.ExportStateToJSON);
+
+  ShowMessage('La partida ha sido reiniciada a cero.');
+end;
+
+procedure TfrmMain.btnPausarClick(Sender: TObject);
+begin
+  if not FGameEngine.GameActive then Exit;
+
+  FPartidaPausada := True;
+
+  // Intercambio visual de los botones
+  if Assigned(btnPausar) then btnPausar.Visible := False;
+  if Assigned(btnReanudar) then btnReanudar.Visible := True;
+
+  btnTirarDado.Enabled := False;
+  lblTurno.Text := '— PARTIDA PAUSADA —';
+end;
+
+procedure TfrmMain.btnReanudarClick(Sender: TObject);
+begin
+  if not FGameEngine.GameActive then Exit;
+
+  FPartidaPausada := False;
+
+  // Intercambio visual de los botones
+  if Assigned(btnReanudar) then btnReanudar.Visible := False;
+  if Assigned(btnPausar) then btnPausar.Visible := True;
+
+  // Restaura visualmente de quién era el turno y rehabilita el dado si es necesario
+  GE_OnTurnChanged(FGameEngine.GetCurrentPlayer);
+end;
+
+procedure TfrmMain.btnMenuPrincipalClick(Sender: TObject);
+begin
+  // 1. Limpiar red
+  if FUseBluetooth then GetBTManager.Disconnect else FNetworkManager.Disconnect;
+  FLocalPlayerID := 0; FUseBluetooth := False;
+
+  // 2. Limpiar motor
+  FGameEngine.ResetGame;
+  FPlayerManager.ResetTakenAvatars;
+
+  // 3. Limpiar visuales
+  imgAvatar1.Visible := False; imgAvatar2.Visible := False;
+  imgAvatar3.Visible := False; imgAvatar4.Visible := False;
+  if Assigned(imgWell) then imgWell.Visible := False;
+
+  FBoardManager.SetActiveBoard(BLANK_IDX);
+  imgBoard.Bitmap := nil;
+
+  btnTirarDado.Enabled := False;
+  FPartidaPausada := False;
+
+  // Reiniciar botones de pausa a su estado por defecto
+  if Assigned(btnPausar) then btnPausar.Visible := True;
+  if Assigned(btnReanudar) then btnReanudar.Visible := False;
+
+  lblTurno.Text := 'Selecciona un tablero para iniciar';
+  lblDado.Text  := 'Dado: —';
+  if Assigned(lblCasilla) then lblCasilla.Text := '';
+
+  ShowMessage('Has regresado al Menú Principal.');
+end;
+
+// ════════════════════════════════════════════════════════════════
+// REFACTOR: MÉTODO CENTRAL DE DIBUJADO DE TABLERO
+// ════════════════════════════════════════════════════════════════
+procedure TfrmMain.RestaurarVisualesDesdeMotor;
+var
+  i, pos: Integer;
+  pt: TPointF;
+  img: TImage;
+begin
+  if FBoardManager.ActiveBoardIdx <> FGameEngine.BoardIndex then
+  begin
+    FBoardManager.LoadBoardIntoImage(FGameEngine.BoardIndex, imgBoard);
+    FBoardManager.SetActiveBoard(FGameEngine.BoardIndex);
+  end;
+  if Assigned(imgWell) then imgWell.Visible := True;
+
+  FPlayerManager.ResetTakenAvatars;
+  FPlayerManager.MarkAvatarTaken(BLANK_IDX);
+  for i := 1 to 4 do
+  begin
+    var avIdx := FGameEngine.PlayerAvatars[i];
+    if avIdx > 0 then
+    begin
+      FPlayerManager.MarkAvatarTaken(avIdx);
+      FPlayerManager.LoadAvatarIntoImage(avIdx, GetAvatarImage(i));
+      GetAvatarImage(i).Tag := avIdx;
+      GetAvatarImage(i).Width := 86;
+      GetAvatarImage(i).Height := 86;
+      GetAvatarImage(i).Visible := True;
+    end
+    else GetAvatarImage(i).Visible := False;
+  end;
+
+  for i := 1 to FGameEngine.TotalPlayers do
+  begin
+    pos := FGameEngine.GetPlayerPosition(i);
+    pt := FBoardManager.GetCellPosition(pos, imgBoard.Width, imgBoard.Height);
+    img := GetAvatarImage(i);
+
+    img.Opacity := 1.0; img.Scale.X := 1.0; img.Scale.Y := 1.0;
+    img.RotationAngle := 0;
+
+    if pos = 0 then
+    begin
+       img.Position.X := pt.X + AVATAR_START_OFFSET[i-1].X;
+       img.Position.Y := pt.Y + AVATAR_START_OFFSET[i-1].Y;
+    end
+    else
+    begin
+       img.Position.X := pt.X; img.Position.Y := pt.Y;
+    end;
+    img.Visible := True; img.BringToFront;
+  end;
+
+  GE_OnTurnChanged(FGameEngine.GetCurrentPlayer);
+end;
+
+// ════════════════════════════════════════════════════════════════
+
 procedure TfrmMain.imgBoardResize(Sender: TObject);
 begin
   if Assigned(FBoardManager) then
-    if FBoardManager.ActiveBoardHasCoords then ResetAvatarsToStart;
+    if FBoardManager.ActiveBoardHasCoords then RestaurarVisualesDesdeMotor;
 end;
 
 procedure TfrmMain.imgBoardMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Single);
@@ -240,22 +465,49 @@ begin
   begin
     FBoardManager.FinishCapture;
     ShowMessage('¡Coordenadas guardadas correctamente!');
-    ResetAvatarsToStart;
+
+    if FGameEngine.GameActive then
+      RestaurarVisualesDesdeMotor
+    else
+      ResetAvatarsToStart;
   end;
 end;
 
 procedure TfrmMain.btnCapturarClick(Sender: TObject);
+var
+  frmAdmin: TfrmAdminLogin;
+  frmBoard: TfrmBoardSelect;
 begin
-  if FBoardManager.ActiveBoardIdx = BLANK_IDX then
-  begin
-    ShowMessage('Selecciona un tablero primero');
-    Exit;
-  end;
-  FBoardManager.StartCapture(FBoardManager.ActiveBoardIdx, imgBoard.Width, imgBoard.Height);
+  frmAdmin := TfrmAdminLogin.Create(Application);
+  try
+    if frmAdmin.ShowModal = mrOk then
+    begin
+      frmBoard := TfrmBoardSelect.CreateWithImages(Application, ilBoards);
+      try
+        if frmBoard.ShowModal = mrOk then
+        begin
+          FBoardManager.LoadBoardIntoImage(frmBoard.SelectedIdx, imgBoard);
+          FBoardManager.SetActiveBoard(frmBoard.SelectedIdx);
 
-  imgAvatar1.Visible := False; imgAvatar2.Visible := False;
-  imgAvatar3.Visible := False; imgAvatar4.Visible := False;
-  lblCoords.Text := Format('Modo captura — Tablero %d: doble click en casilla 1/%d', [FBoardManager.ActiveBoardIdx, MAX_CELLS]);
+          FBoardManager.StartCapture(
+            FBoardManager.ActiveBoardIdx,
+            imgBoard.Width,
+            imgBoard.Height
+          );
+
+          imgAvatar1.Visible := False; imgAvatar2.Visible := False;
+          imgAvatar3.Visible := False; imgAvatar4.Visible := False;
+          if Assigned(imgWell) then imgWell.Visible := False;
+
+          lblCoords.Text := Format('Modo Administrador — Tablero %d: doble click en casilla 1/%d', [FBoardManager.ActiveBoardIdx, MAX_CELLS]);
+        end;
+      finally
+        frmBoard.Free;
+      end;
+    end;
+  finally
+    frmAdmin.Free;
+  end;
 end;
 
 procedure TfrmMain.btnRulesClick(Sender: TObject);
@@ -274,9 +526,6 @@ var
 begin
   frmLobby := TfrmLobby.Create(Application);
 
-  // ══════════════════════════════════════════════════════════════
-  // BLOQUE WINDOWS: Seguro, Síncrono y tradicional
-  // ══════════════════════════════════════════════════════════════
   {$IF DEFINED(MSWINDOWS)}
   try
     if frmLobby.ShowModal = mrOk then
@@ -333,11 +582,12 @@ begin
         if FUseBluetooth then
         begin
           lblTurno.Text := 'Conectando por Bluetooth a ' + frmLobby.BluetoothDeviceName + '...';
+          // Se usa TThread(nil) para evitar el error "no overloaded version of Queue"
           TThread.CreateAnonymousThread(procedure
           begin
             try
               GetBTManager.ConnectToDevice(frmLobby.BluetoothDeviceName);
-              TThread.Queue(nil, procedure
+              TThread.Queue(TThread(nil), procedure
               begin
                 json := TJSONObject.Create;
                 json.AddPair('token', FMyClientToken);
@@ -346,7 +596,7 @@ begin
                 json.Free;
               end);
             except
-              TThread.Queue(nil, procedure begin ShowMessage('Error de conexión Bluetooth.'); end);
+              TThread.Queue(TThread(nil), procedure begin ShowMessage('Error de conexión Bluetooth.'); end);
             end;
           end).Start;
         end
@@ -357,7 +607,7 @@ begin
           begin
             try
               FNetworkManager.ConnectToHost(frmLobby.HostIP, 7777);
-              TThread.Queue(nil, procedure
+              TThread.Queue(TThread(nil), procedure
               begin
                 json := TJSONObject.Create;
                 json.AddPair('token', FMyClientToken);
@@ -366,7 +616,7 @@ begin
                 json.Free;
               end);
             except
-              TThread.Queue(nil, procedure begin ShowMessage('Error de conexión LAN.'); end);
+              TThread.Queue(TThread(nil), procedure begin ShowMessage('Error de conexión LAN.'); end);
             end;
           end).Start;
         end;
@@ -375,10 +625,6 @@ begin
   finally
     frmLobby.Free;
   end;
-
-  // ══════════════════════════════════════════════════════════════
-  // BLOQUE ANDROID/MÓVILES: Asíncrono puro (Obligatorio para evitar bloqueos)
-  // ══════════════════════════════════════════════════════════════
   {$ELSE}
   frmLobby.ShowModal(
     procedure(LobbyResult: TModalResult)
@@ -447,7 +693,7 @@ begin
             begin
               try
                 GetBTManager.ConnectToDevice(frmLobby.BluetoothDeviceName);
-                TThread.Queue(nil, procedure
+                TThread.Queue(TThread(nil), procedure
                 begin
                   json := TJSONObject.Create;
                   json.AddPair('token', FMyClientToken);
@@ -466,7 +712,7 @@ begin
             begin
               try
                 FNetworkManager.ConnectToHost(frmLobby.HostIP, 7777);
-                TThread.Queue(nil, procedure
+                TThread.Queue(TThread(nil), procedure
                 begin
                   json := TJSONObject.Create;
                   json.AddPair('token', FMyClientToken);
@@ -549,7 +795,6 @@ begin
   frm := TfrmAvatarSelect.CreateForPlayer(Application, ilAvatars, FPlayerManager.GetTakenArray, NombreJugador);
 
   {$IF DEFINED(MSWINDOWS)}
-  // ════════ WINDOWS ════════
   try
     if frm.ShowModal = mrOk then
     begin
@@ -586,7 +831,6 @@ begin
     frm.Free;
   end;
   {$ELSE}
-  // ════════ ANDROID ════════
   frm.ShowModal(
     procedure(ModalResult: TModalResult)
     begin
@@ -655,8 +899,13 @@ begin
   begin
     FTmrWalk.Enabled := False;
 
-    if Assigned(lblCasilla)
-    then lblCasilla.Text := Format('J%d cayó en C%d', [FWalkingPlayer, FWalkTargetCell + 1]);
+    if Assigned(lblCasilla) then
+    begin
+      if FWalkTargetCell = 0 then
+        lblCasilla.Text := Format('J%d está en el Inicio', [FWalkingPlayer])
+      else
+        lblCasilla.Text := Format('J%d cayó en C%d', [FWalkingPlayer, FWalkTargetCell]);
+    end;
 
     if FPendingRuleType <> '' then
     begin
@@ -672,7 +921,7 @@ begin
         TThread.CreateAnonymousThread(procedure
           begin
             Sleep(1200);
-            TThread.Queue(nil, procedure
+            TThread.Queue(TThread(nil), procedure
               begin
                 FTmrWalk.Enabled := True;
               end);
@@ -812,6 +1061,8 @@ end;
 procedure TfrmMain.GE_OnTurnChanged(NewPlayerID: Integer);
 begin
   lblTurno.Text := Format('Turno: Jugador %d', [NewPlayerID]);
+  if FPartidaPausada then Exit;
+
   if NewPlayerID = FLocalPlayerID then
   begin
     rctnglSidebar.Fill.Color := TAlphaColorRec.Limegreen;
@@ -833,7 +1084,7 @@ begin
   TThread.CreateAnonymousThread(procedure
     begin
       Sleep(2000);
-      TThread.Queue(nil, procedure
+      TThread.Queue(TThread(nil), procedure
         begin
           ShowMessage(Format('¡Felicidades! ¡El Jugador %d ganó la partida!', [WinnerID]));
         end);
@@ -842,10 +1093,7 @@ end;
 
 procedure TfrmMain.Net_OnMessageReceived(const Command: string; JSONData: TJSONObject);
 var
-  i, pos: Integer;
   json: TJSONObject;
-  pt: TPointF;
-  img: TImage;
 begin
   if Command = 'JOIN_REQUEST' then
   begin
@@ -879,48 +1127,7 @@ begin
     if Assigned(JSONData) then
     begin
       FGameEngine.ImportStateFromJSON(JSONData.ToJSON);
-
-      if FBoardManager.ActiveBoardIdx <> FGameEngine.BoardIndex then
-      begin
-        FBoardManager.LoadBoardIntoImage(FGameEngine.BoardIndex, imgBoard);
-        FBoardManager.SetActiveBoard(FGameEngine.BoardIndex);
-      end;
-
-      if Assigned(imgWell) then imgWell.Visible := True;
-
-      for i := 1 to 4 do
-      begin
-        var avIdx := FGameEngine.PlayerAvatars[i];
-        if avIdx > 0 then
-        begin
-          FPlayerManager.MarkAvatarTaken(avIdx);
-          FPlayerManager.LoadAvatarIntoImage(avIdx, GetAvatarImage(i));
-          GetAvatarImage(i).Tag := avIdx;
-          GetAvatarImage(i).Width := 86;
-          GetAvatarImage(i).Height := 86;
-          GetAvatarImage(i).Visible := True;
-        end;
-      end;
-
-      for i := 1 to FGameEngine.TotalPlayers do
-      begin
-        pos := FGameEngine.GetPlayerPosition(i);
-        pt := FBoardManager.GetCellPosition(pos, imgBoard.Width, imgBoard.Height);
-        img := GetAvatarImage(i);
-
-        img.Opacity := 1.0; img.Scale.X := 1.0; img.Scale.Y := 1.0;
-
-        if pos = 0 then
-        begin
-           img.Position.X := pt.X + AVATAR_START_OFFSET[i-1].X;
-           img.Position.Y := pt.Y + AVATAR_START_OFFSET[i-1].Y;
-        end
-        else
-        begin
-           img.Position.X := pt.X; img.Position.Y := pt.Y;
-        end;
-        img.Visible := True; img.BringToFront;
-      end;
+      RestaurarVisualesDesdeMotor;
 
       if (not NetIsHost) and (FLocalPlayerID > 0) and (FGameEngine.PlayerAvatars[FLocalPlayerID] = 0) then
       begin

@@ -21,7 +21,8 @@ uses
   uConfig in 'src\uConfig.pas',
   fDiceForm in 'src\fDiceForm.pas',
   fRulesForm in 'src\fRulesForm.pas',
-  fLobbyForm in 'src\fLobbyForm.pas';
+  fLobbyForm in 'src\fLobbyForm.pas',
+  fAdminLogin in 'src\fAdminLogin.pas';
 
 {$R *.res}
 

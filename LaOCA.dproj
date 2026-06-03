@@ -271,6 +271,7 @@
         <DCCReference Include="src\fDiceForm.pas"/>
         <DCCReference Include="src\fRulesForm.pas"/>
         <DCCReference Include="src\fLobbyForm.pas"/>
+        <DCCReference Include="src\fAdminLogin.pas"/>
         <BuildConfiguration Include="Base">
             <Key>Base</Key>
         </BuildConfiguration>
@@ -543,6 +544,18 @@
                 <DeployFile LocalName="R:\Win32\Debug\LaOCA.exe" Configuration="Debug" Class="ProjectOutput">
                     <Platform Name="Win32">
                         <RemoteName>LaOCA.exe</RemoteName>
+                        <Overwrite>true</Overwrite>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="R:\Win64\Debug\LaOCA.exe" Configuration="Debug" Class="ProjectOutput">
+                    <Platform Name="Win64">
+                        <RemoteName>LaOCA.exe</RemoteName>
+                        <Overwrite>true</Overwrite>
+                    </Platform>
+                </DeployFile>
+                <DeployFile LocalName="R:\Win64\Debug\LaOCA.rsm" Configuration="Debug" Class="DebugSymbols">
+                    <Platform Name="Win64">
+                        <RemoteName>LaOCA.rsm</RemoteName>
                         <Overwrite>true</Overwrite>
                     </Platform>
                 </DeployFile>

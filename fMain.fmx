@@ -53993,9 +53993,9 @@ object frmMain: TfrmMain
         Align = Bottom
         StyledSettings = [Family, FontColor]
         Position.X = 5.000000000000000000
-        Position.Y = 423.000000000000000000
+        Position.Y = 398.000000000000000000
         Size.Width = 127.000000000000000000
-        Size.Height = 50.000000000000000000
+        Size.Height = 75.000000000000000000
         Size.PlatformDefault = False
         TextSettings.Font.Size = 15.000000000000000000
         TextSettings.Font.StyleExt = {00070000000000000004000000}
@@ -54006,7 +54006,7 @@ object frmMain: TfrmMain
         Align = Bottom
         StyledSettings = [Family, FontColor]
         Position.X = 5.000000000000000000
-        Position.Y = 373.000000000000000000
+        Position.Y = 348.000000000000000000
         Size.Width = 127.000000000000000000
         Size.Height = 50.000000000000000000
         Size.PlatformDefault = False
@@ -54045,7 +54045,7 @@ object frmMain: TfrmMain
         Align = Bottom
         StyledSettings = [Family, FontColor]
         Position.X = 5.000000000000000000
-        Position.Y = 323.000000000000000000
+        Position.Y = 298.000000000000000000
         Size.Width = 127.000000000000000000
         Size.Height = 50.000000000000000000
         Size.PlatformDefault = False
@@ -54053,6 +54053,104 @@ object frmMain: TfrmMain
         TextSettings.Font.StyleExt = {00070000000000000004000000}
         Text = 'Casilla: --'
         TabOrder = 10
+      end
+      object lytSysControl: TLayout
+        Align = Top
+        Margins.Bottom = 3.000000000000000000
+        Position.X = 5.000000000000000000
+        Position.Y = 180.000000000000000000
+        Size.Width = 127.000000000000000000
+        Size.Height = 100.000000000000000000
+        Size.PlatformDefault = False
+        TabOrder = 11
+        object rctnglSysControl: TRectangle
+          Align = Top
+          Size.Width = 127.000000000000000000
+          Size.Height = 50.000000000000000000
+          Size.PlatformDefault = False
+          object btnCargar: TButton
+            Align = Client
+            Hint = 'Cargar Partida'
+            Size.Width = 43.000000000000000000
+            Size.Height = 50.000000000000000000
+            Size.PlatformDefault = False
+            StyleLookup = 'organizetoolbuttonbordered'
+            TabOrder = 0
+            Text = 'btnCargar'
+            TextSettings.Trimming = None
+            OnClick = btnCargarClick
+          end
+          object btnGuardar: TButton
+            Align = Left
+            Hint = 'Guardar Partida'
+            Size.Width = 42.000000000000000000
+            Size.Height = 50.000000000000000000
+            Size.PlatformDefault = False
+            StyleLookup = 'pagecurltoolbutton'
+            TabOrder = 1
+            Text = 'btnGuardar'
+            TextSettings.Trimming = None
+            OnClick = btnGuardarClick
+          end
+          object btnReiniciar: TButton
+            Align = Right
+            Hint = 'Reiniciar Partida'
+            Position.X = 85.000000000000000000
+            Size.Width = 42.000000000000000000
+            Size.Height = 50.000000000000000000
+            Size.PlatformDefault = False
+            StyleLookup = 'refreshtoolbuttonbordered'
+            TabOrder = 2
+            Text = 'btnReiniciar'
+            TextSettings.Trimming = None
+            OnClick = btnReiniciarClick
+          end
+        end
+        object rctngl1: TRectangle
+          Align = Bottom
+          Position.Y = 50.000000000000000000
+          Size.Width = 127.000000000000000000
+          Size.Height = 50.000000000000000000
+          Size.PlatformDefault = False
+          object btnPausar: TButton
+            Align = Left
+            Hint = 'Pausar Juego'
+            Size.Width = 64.000000000000000000
+            Size.Height = 50.000000000000000000
+            Size.PlatformDefault = False
+            StyleLookup = 'pausetoolbuttonbordered'
+            TabOrder = 0
+            Text = 'btnPausar'
+            TextSettings.Trimming = None
+            OnClick = btnPausarClick
+          end
+          object btnReanudar: TButton
+            Align = Left
+            Hint = 'Reanudar Juego'
+            Position.X = 64.000000000000000000
+            Size.Width = 64.000000000000000000
+            Size.Height = 50.000000000000000000
+            Size.PlatformDefault = False
+            StyleLookup = 'playtoolbuttonbordered'
+            TabOrder = 1
+            Text = 'btnReanudar'
+            TextSettings.Trimming = None
+            Visible = False
+            OnClick = btnReanudarClick
+          end
+          object btnMenuPrincipal: TButton
+            Align = Client
+            Hint = 'Menu Principal'
+            Size.Width = 63.000000000000000000
+            Size.Height = 50.000000000000000000
+            Size.PlatformDefault = False
+            StyleLookup = 'escapetoolbuttonbordered'
+            TabOrder = 2
+            Text = 'btnMenuPrincipal'
+            TextSettings.Trimming = None
+            OnClick = btnMenuPrincipalClick
+          end
+        end
       end
     end
   end
