@@ -254,7 +254,6 @@
         <DCCReference Include="src\uDatabase.pas"/>
         <DCCReference Include="src\uBoardManager.pas"/>
         <DCCReference Include="src\fBoardSelectForm.pas"/>
-        <DCCReference Include="src\uConfigForm.pas"/>
         <DCCReference Include="src\uGameEngine.pas"/>
         <DCCReference Include="src\uTurnManager.pas"/>
         <DCCReference Include="src\uPlayerManager.pas"/>

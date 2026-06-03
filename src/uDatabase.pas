@@ -59,6 +59,10 @@ begin
   FConn := TFDConnection.Create(nil);
   FConn.Params.DriverID := 'SQLite';
   FConn.Params.Database := DBPath;
+
+  // ¡NUEVO! Permite que Host y Cliente usen el archivo sin bloquearse
+  FConn.Params.Add('LockingMode=Normal');
+
   FConn.Connected := True;
   CreateTables;
 end;

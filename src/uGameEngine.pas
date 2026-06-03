@@ -24,6 +24,8 @@ type
     FPlayerBlockedTurns : array[0..3] of Integer; // Control de castigos
     FBoardIndex: Integer;
 
+    FStatus: TGameStatus;
+
     FOnDiceRolled    : TOnDiceRolled;
     FOnPlayerMoved   : TOnPlayerMoved;
     FOnTurnChanged   : TOnTurnChanged;
@@ -43,6 +45,8 @@ type
     function TryRollDice(PlayerID: Integer; ForcedDice: Integer = 0): Boolean;
     procedure StartGame;
     procedure ResetGame;
+
+    property Status: TGameStatus read FStatus write FStatus;
 
     function GetPlayerPosition(PlayerID: Integer): Integer;
     function GetCurrentPlayer: Integer;
@@ -72,6 +76,7 @@ begin
   FTotalPlayers := ATotalPlayers;
   FTurnManager  := TTurnManager.Create(ATotalPlayers);
   FGameActive   := False;
+  FStatus       := gsPlaying;
   for i := 0 to 3 do
   begin
     FPlayerPositions[i] := 0;
@@ -253,6 +258,10 @@ begin
     JSONObj.AddPair('TotalPlayers', TJSONNumber.Create(FTotalPlayers));
     JSONObj.AddPair('CurrentTurn', TJSONNumber.Create(FTurnManager.CurrentPlayer));
 
+    // ─── ¡NUEVA LÍNEA AÑADIDA AQUÍ! ───
+    JSONObj.AddPair('Status', TJSONNumber.Create(Ord(FStatus)));
+    // ──────────────────────────────────
+
     // Arreglo de posiciones
     ArrPos := TJSONArray.Create;
     for i := 0 to 3
@@ -281,7 +290,7 @@ var
   JSONVal: TJSONValue;
   JSONObj: TJSONObject;
   ArrPos, ArrBlocked, ArrAvatars: TJSONArray;
-  i, oldPos, newPos, newTurn: Integer;
+  i, oldPos, newPos, newTurn, valStatus: Integer;
 begin
   JSONVal := TJSONObject.ParseJSONValue(JSONState);
   if not (JSONVal is TJSONObject) then Exit;
@@ -290,6 +299,12 @@ begin
   try
     FBoardIndex := JSONObj.GetValue<Integer>('BoardIndex');
     FGameActive := JSONObj.GetValue<Boolean>('GameActive');
+
+    // ─── ¡NUEVA LÍNEA AÑADIDA AQUÍ! ───
+    if JSONObj.TryGetValue<Integer>('Status', valStatus)
+    then FStatus := TGameStatus(valStatus)
+    else FStatus := gsPlaying; // Por si cargas una partida muy vieja que no tenía el status
+    // ──────────────────────────────────
 
     // ── ¡SOLUCIÓN AL BUG 1! Usamos la Propiedad (sin la 'F') para que reconstruya los turnos ──
     TotalPlayers := JSONObj.GetValue<Integer>('TotalPlayers');
@@ -319,8 +334,8 @@ begin
       end;
     end;
 
-    if Assigned(FOnTurnChanged) then
-      FOnTurnChanged(FTurnManager.CurrentPlayer);
+    if Assigned(FOnTurnChanged)
+    then FOnTurnChanged(FTurnManager.CurrentPlayer);
 
   finally
     JSONVal.Free;

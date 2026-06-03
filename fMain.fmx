@@ -54058,7 +54058,7 @@ object frmMain: TfrmMain
         Align = Top
         Margins.Bottom = 3.000000000000000000
         Position.X = 5.000000000000000000
-        Position.Y = 180.000000000000000000
+        Position.Y = 224.000000000000000000
         Size.Width = 127.000000000000000000
         Size.Height = 100.000000000000000000
         Size.PlatformDefault = False
@@ -54151,6 +54151,19 @@ object frmMain: TfrmMain
             OnClick = btnMenuPrincipalClick
           end
         end
+      end
+      object btnRellenarBots: TButton
+        Align = Top
+        Margins.Bottom = 3.000000000000000000
+        Position.X = 5.000000000000000000
+        Position.Y = 180.000000000000000000
+        Size.Width = 127.000000000000000000
+        Size.Height = 41.000000000000000000
+        Size.PlatformDefault = False
+        TabOrder = 12
+        Text = #55358#56598' Agregar Bots'
+        TextSettings.Trimming = None
+        OnClick = btnRellenarBotsClick
       end
     end
   end

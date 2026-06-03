@@ -36,13 +36,16 @@ type
     TurnsToWait : Integer; // turnos que debe esperar bloqueado
   end;
 
+
+  TGameStatus = (gsPlaying, gsPaused, gsFinished);
+
   // ── 3. Tipos de Estado del Juego ──────────────────────────────
   TGameState = record
-    BoardIndex   : Integer;
-    ActiveTurn   : Integer; // ID del jugador activo, util para jugabilidad remota
-    Players      : array[0..3] of TPlayer;
-    TotalPlayers : Integer;
-    GameActive   : Boolean;
+BoardIndex: Integer;
+    ActiveTurn: Integer; // ID del jugador activo, util para jugabilidad remota
+    TotalPlayers: Integer;
+    Status: TGameStatus;
+    Players: array[0..3] of TPlayer;
   end;
 
 const

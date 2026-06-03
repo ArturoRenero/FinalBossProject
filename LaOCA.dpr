@@ -8,7 +8,6 @@ uses
   uDatabase in 'src\uDatabase.pas',
   uBoardManager in 'src\uBoardManager.pas',
   fBoardSelectForm in 'src\fBoardSelectForm.pas',
-  uConfigForm in 'src\uConfigForm.pas',
   uGameEngine in 'src\uGameEngine.pas',
   uTurnManager in 'src\uTurnManager.pas',
   uPlayerManager in 'src\uPlayerManager.pas',
