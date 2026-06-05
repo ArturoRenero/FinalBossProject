@@ -19,8 +19,6 @@ type
 implementation
 
 class function TRulesEngine.EvaluateCell(BoardIdx, CurrentCell: Integer): TRuleResult;
-var
-  VisualCell: Integer;
 begin
   // Valores por defecto
   Result.RuleType := '';
@@ -29,10 +27,7 @@ begin
   Result.RollAgain := False;
   Result.Message := '';
 
-  // Trabajaremos con la casilla visual (1 a 63) para que coincida con el tablero real
-  VisualCell := CurrentCell + 1;
-
-  case VisualCell of
+  case CurrentCell of
     5, 9, 14, 18, 23, 27, 32, 36, 41, 45, 50, 54, 59: // 1. Ocas
       begin
         Result.RuleType := 'GOOSE';
@@ -45,7 +40,7 @@ begin
       begin
         Result.RuleType := 'BRIDGE';
         Result.RollAgain := True;
-        if VisualCell = 6 then Result.NewCell := 12 - 1
+        if CurrentCell = 6 then Result.NewCell := 12 - 1
         else Result.NewCell := 6 - 1;
         Result.Message := '¡De puente a puente y tiro porque me lleva la corriente!';
       end;
@@ -59,7 +54,7 @@ begin
       begin
         Result.RuleType := 'DICE';
         Result.RollAgain := True;
-        if VisualCell = 26 then Result.NewCell := 53 - 1
+        if CurrentCell = 26 then Result.NewCell := 53 - 1
         else Result.NewCell := 26 - 1;
         Result.Message := '¡De dado a dado y tiro porque me ha tocado!';
       end;

@@ -258,19 +258,22 @@ end;
 
 function TfrmMain.NetIsHost: Boolean;
 begin
-  if FUseBluetooth then Result := GetBTManager.IsHost
+  if FUseBluetooth
+  then Result := GetBTManager.IsHost
   else Result := FNetworkManager.IsHost;
 end;
 
 procedure TfrmMain.NetSendCommand(const Command: string; JSONData: TJSONObject);
 begin
-  if FUseBluetooth then GetBTManager.SendCommand(Command, JSONData)
+  if FUseBluetooth
+  then GetBTManager.SendCommand(Command, JSONData)
   else FNetworkManager.SendCommand(Command, JSONData);
 end;
 
 procedure TfrmMain.NetBroadcastState(const StateJSON: string);
 begin
-  if FUseBluetooth then GetBTManager.BroadcastState(StateJSON)
+  if FUseBluetooth
+  then GetBTManager.BroadcastState(StateJSON)
   else FNetworkManager.BroadcastState(StateJSON);
 end;
 
@@ -496,8 +499,17 @@ end; // RestaurarVisualesDesdeMotor()
 
 procedure TfrmMain.imgBoardResize(Sender: TObject);
 begin
-  if Assigned(FBoardManager) then
-    if FBoardManager.ActiveBoardHasCoords then RestaurarVisualesDesdeMotor;
+  if not Assigned(FBoardManager) then Exit;
+  if not FBoardManager.ActiveBoardHasCoords then Exit;
+
+  // ── ¡EL ESCUDO ANTI-BUGS! ──
+  // Si el dado está girando o un pato está caminando,
+  // bloqueamos cualquier intromisión visual de FMX.
+  if FDiceIsRolling or FTmrWalk.Enabled then Exit;
+
+  // Evitamos fallos matemáticos si la ventana se minimiza (Width = 0)
+  if imgBoard.Width > 50 then
+    RestaurarVisualesDesdeMotor;
 end;
 
 procedure TfrmMain.imgBoardMouseMove(Sender: TObject; Shift: TShiftState; X, Y: Single);
@@ -956,6 +968,10 @@ begin
 
   btnTirarDado.Enabled := False;
 
+  // ── ¡NUEVO! CIERRA EL ESCUDO AL INSTANTE ──
+  FDiceIsRolling := True;
+  // ──────────────────────────────────────────
+
   if NetIsHost then
   begin
     json := TJSONObject.Create;
@@ -1013,17 +1029,21 @@ begin
     Exit;
   end;
 
-  if FVisualPositions[FWalkingPlayer] < FWalkTargetCell
-  then step := 1
-  else step := -1;
+  if FVisualPositions[FWalkingPlayer] < FWalkTargetCell then step := 1 else step := -1;
 
   FVisualPositions[FWalkingPlayer] := FVisualPositions[FWalkingPlayer] + step;
+  pt := FBoardManager.GetCellPosition(FVisualPositions[FWalkingPlayer], imgBoard.Width, imgBoard.Height);
 
-  // OPTIMIZACIÓN: Solo obtenemos el avatar que camina 1 vez por Tick, no 3.
   var img := GetAvatarImage(FWalkingPlayer);
 
+  // ── ¡LA CURA AL VUELO HACIA LA ESQUINA (0,0)! ──
+  // Detiene forzosamente cualquier animación zombi antes de inyectar la nueva
+  TAnimator.StopPropertyAnimation(img, 'Position.X');
+  TAnimator.StopPropertyAnimation(img, 'Position.Y');
+  // ───────────────────────────────────────────────
+
   TAnimator.AnimateFloat(img, 'Position.X', pt.X, 0.2);
-  TAnimator.AnimateFloat(img, 'Position.Y', pt.Y, 0.2)
+  TAnimator.AnimateFloat(img, 'Position.Y', pt.Y, 0.2);
 end; // tmrWalkTimer()
 
 procedure TfrmMain.EjecutarAnimacionRegla(PlayerID: Integer; const RuleType, Message: string);

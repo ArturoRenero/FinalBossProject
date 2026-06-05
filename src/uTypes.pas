@@ -52,7 +52,7 @@ const
   // ── Constantes Globales ───────────────────────────────────────
   MAX_PLAYERS        = 4;
   TOTAL_CELLS        = 63;
-  MAX_CELLS          = 63;
+  MAX_CELLS          = 64; // <-- ¡CAMBIADO A 64! (El Inicio + 63 Casillas)
   WINNING_CELL       = 63;
   BOT_THINK_DELAY_MS = 1500; // "espera" que le tomaría a un humano tirar los dados
   BLANK_IDX          = 0;    // índice 0 = blank en la ImageList
