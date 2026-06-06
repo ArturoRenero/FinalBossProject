@@ -1,6 +1,8 @@
 unit uBotAI;
 
-// Ejecuta los turnos del Bot. Llama a Sleep() para simular tiempo de respuesta humano, luego ejecuta el lanzamiento de dados y movimiento de ficha, pasando por el mismo RulesEngine que un jugador humano.
+// Controla los turnos de los bots sin mover directamente el motor del juego.
+// El bot espera un momento para simular pensamiento y despuÃ©s solicita una tirada
+// al formulario principal. AsÃ­ el Host puede mandar la misma tirada por LAN/Bluetooth.
 
 interface
 
@@ -8,10 +10,14 @@ uses
   System.SysUtils, System.Classes, uGameEngine;
 
 type
+  TBotRollRequestEvent = procedure(PlayerID: Integer) of object;
+
   TBotAI = class
   private
     FPlayerID: Integer;
     FGameEngine: TGameEngine;
+    FThinking: Boolean;
+    FOnRollRequested: TBotRollRequestEvent;
   public
     constructor Create(APlayerID: Integer; AEngine: TGameEngine);
 
@@ -19,6 +25,7 @@ type
     procedure JugarTurno;
 
     property PlayerID: Integer read FPlayerID;
+    property OnRollRequested: TBotRollRequestEvent read FOnRollRequested write FOnRollRequested;
   end;
 
 implementation
@@ -28,6 +35,7 @@ begin
   inherited Create;
   FPlayerID := APlayerID;
   FGameEngine := AEngine;
+  FThinking := False;
 end;
 
 procedure TBotAI.AsignarAvatarAleatorio;
@@ -37,7 +45,7 @@ var
 begin
   SetLength(Available, 0);
 
-  // Buscar avatares del 1 al 4 que no estén tomados por el motor
+  // Buscar avatares del 1 al 4 que no estÃ©n tomados por el motor.
   for i := 1 to 4 do
   begin
     if (FGameEngine.PlayerAvatars[1] <> i) and
@@ -52,7 +60,7 @@ begin
 
   if Length(Available) > 0 then
   begin
-    // Elegir uno al azar y asignarlo directo a la memoria del motor
+    // Elegir uno al azar y asignarlo al motor.
     randIdx := Random(Length(Available));
     FGameEngine.PlayerAvatars[FPlayerID] := Available[randIdx];
   end;
@@ -60,24 +68,31 @@ end;
 
 procedure TBotAI.JugarTurno;
 begin
+  if FThinking then Exit;
   if not FGameEngine.GameActive then Exit;
   if FGameEngine.GetCurrentPlayer <> FPlayerID then Exit;
 
-  // Hilo anónimo: Evita que el juego se congele mientras el Bot "Piensa"
+  FThinking := True;
+
+  // Hilo anÃ³nimo: evita congelar la interfaz mientras el bot "piensa".
   TThread.CreateAnonymousThread(
     procedure
     begin
-      // Simulamos la latencia de un cerebro humano (entre 1 y 2.5 segundos)
+      // Simulamos un pequeÃ±o tiempo de respuesta humano.
       Sleep(1000 + Random(1500));
 
-      // Regresamos al hilo principal para mover las fichas con seguridad
+      // Regresamos al hilo principal para pedir la tirada con seguridad.
       TThread.Queue(TThread(nil),
         procedure
         begin
-          // Doble validación: Asegurarnos de que nadie pausó o cerró el juego mientras pensaba
-          if FGameEngine.GameActive and (FGameEngine.GetCurrentPlayer = FPlayerID) then
-          begin
-            FGameEngine.TryRollDice(FPlayerID);
+          try
+            if FGameEngine.GameActive and (FGameEngine.GetCurrentPlayer = FPlayerID) then
+            begin
+              if Assigned(FOnRollRequested) then
+                FOnRollRequested(FPlayerID);
+            end;
+          finally
+            FThinking := False;
           end;
         end);
     end).Start;

@@ -46,9 +46,8 @@ begin
   FPlayerIPs := TStringList.Create;
   FTCPServer := TIdTCPServer.Create(nil);
 
-  // ── ¡LA CURA AL ERROR 10048! ──
-  FTCPServer.ReuseSocket := rsTrue; // Obliga a Windows a liberar el puerto
-  // ──────────────────────────────
+  // Ayuda a reutilizar el puerto si Windows lo dejó ocupado por una ejecución anterior.
+  FTCPServer.ReuseSocket := rsTrue;
 
   FTCPServer.OnExecute := ServerExecute;
   FTCPClient := TIdTCPClient.Create(nil);

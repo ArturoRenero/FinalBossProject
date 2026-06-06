@@ -155,11 +155,11 @@ begin
   Result := True;
   pIdx   := PlayerID - 1;
 
-  // 1. Tirar dado
-  diceVal := RollDiceValue;
-  if ForcedDice > 0
-  then diceVal := ForcedDice
-  else diceVal := RollDiceValue;
+  // 1. Tirar dado. Si viene por red, ForcedDice asegura que todos usen el mismo valor.
+  if ForcedDice > 0 then
+    diceVal := ForcedDice
+  else
+    diceVal := RollDiceValue;
 
   if Assigned(FOnDiceRolled)
   then FOnDiceRolled(PlayerID, diceVal);
