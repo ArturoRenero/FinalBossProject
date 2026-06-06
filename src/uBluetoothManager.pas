@@ -91,7 +91,7 @@ begin
           AcceptedSocket := FServerSocket.Accept(1000);
           if Assigned(AcceptedSocket) then
           begin
-            // ¡CAMBIADO A QUEUE!
+            // Se usa Queue para actualizar la lista en el hilo principal.
             TThread.Queue(nil, procedure
               begin
                 FConnectedClients.Add(AcceptedSocket);
@@ -140,7 +140,7 @@ begin
     end;
   end
   else
-    raise Exception.Create('Dispositivo Bluetooth no encontrado. ¿Están emparejados?');
+    raise Exception.Create('Dispositivo Bluetooth no encontrado. ï¿½Estï¿½n emparejados?');
 end;
 
 procedure TBluetoothNetworkManager.Disconnect;
@@ -258,7 +258,7 @@ end;
 
 procedure TBluetoothNetworkManager.ProcessIncomingMessage(const RawMessage: string);
 begin
-  TThread.Queue(TThread(nil), procedure // ¡CORREGIDO!
+  TThread.Queue(TThread(nil), procedure // Procesa el mensaje en el hilo principal.
     var
       JSONVal: TJSONValue;
       JSONObj, DataObj: TJSONObject;

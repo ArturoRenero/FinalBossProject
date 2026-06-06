@@ -20,7 +20,7 @@ implementation
 
 class function TRulesEngine.EvaluateCell(BoardIdx, CurrentCell: Integer): TRuleResult;
 begin
-  // Valores por defecto
+  // Valores por defecto.
   Result.RuleType := '';
   Result.NewCell := -1;
   Result.TurnsToSkip := 0;
@@ -28,59 +28,69 @@ begin
   Result.Message := '';
 
   case CurrentCell of
-    5, 9, 14, 18, 23, 27, 32, 36, 41, 45, 50, 54, 59: // 1. Ocas
+    5, 9, 14, 18, 23, 27, 32, 36, 41, 45, 50, 54, 59: // Ocas
       begin
         Result.RuleType := 'GOOSE';
         Result.RollAgain := True;
-        // Al NO modificar Result.NewCell, se queda en -1.
-        // El jugador se queda en la casilla actual y solo recibe el turno extra.
-        Result.Message := '¡Casilla de Oca! Ganas un turno extra.';
+        // La ficha se queda en la misma casilla y solo conserva el turno.
+        Result.Message := 'Casilla de Oca: ganas un turno extra.';
       end;
-    6, 12: // 2. Puentes
+
+    6, 12: // Puentes
       begin
         Result.RuleType := 'BRIDGE';
         Result.RollAgain := True;
-        if CurrentCell = 6 then Result.NewCell := 12 - 1
-        else Result.NewCell := 6 - 1;
-        Result.Message := '¡De puente a puente y tiro porque me lleva la corriente!';
+        if CurrentCell = 6 then
+          Result.NewCell := 12
+        else
+          Result.NewCell := 6;
+        Result.Message := 'De puente a puente: vuelves a tirar.';
       end;
-    19: // 3. Posada
+
+    19: // Posada
       begin
         Result.RuleType := 'INN';
         Result.TurnsToSkip := 1;
-        Result.Message := 'Caíste en la Posada. Pierdes 1 turno.';
+        Result.Message := 'Caiste en la Posada. Pierdes 1 turno.';
       end;
-    26, 53: // 7. Dados
+
+    26, 53: // Dados
       begin
         Result.RuleType := 'DICE';
         Result.RollAgain := True;
-        if CurrentCell = 26 then Result.NewCell := 53 - 1
-        else Result.NewCell := 26 - 1;
-        Result.Message := '¡De dado a dado y tiro porque me ha tocado!';
+        if CurrentCell = 26 then
+          Result.NewCell := 53
+        else
+          Result.NewCell := 26;
+        Result.Message := 'De dado a dado: vuelves a tirar.';
       end;
-    31: // 4. Pozo
+
+    31: // Pozo
       begin
         Result.RuleType := 'WELL';
         Result.TurnsToSkip := 2;
-        Result.Message := '¡Caíste al pozo! Pierdes 2 turnos.';
+        Result.Message := 'Caiste al pozo. Pierdes 2 turnos.';
       end;
-    42: // 5. El Laberinto
+
+    42: // Laberinto
       begin
         Result.RuleType := 'MAZE';
-        Result.NewCell := 30 - 1; // 29 en índice
+        Result.NewCell := 30;
         Result.Message := 'Te perdiste en el Laberinto. Retrocedes a la casilla 30.';
       end;
-    56: // 6. La Cárcel
+
+    56: // Carcel
       begin
         Result.RuleType := 'PRISON';
         Result.TurnsToSkip := 3;
-        Result.Message := '¡A la cárcel! Pierdes 3 turnos.';
+        Result.Message := 'A la carcel. Pierdes 3 turnos.';
       end;
-    58: // 8. La Calavera (Muerte)
+
+    58: // Calavera / muerte
       begin
         Result.RuleType := 'DEATH';
-        Result.NewCell := 1 - 1; // Índice 0 (Salida)
-        Result.Message := '¡La Calavera! Regresas a la casilla de inicio.';
+        Result.NewCell := 0; // Inicio.
+        Result.Message := 'La Calavera: regresas al inicio.';
       end;
   end;
 end;

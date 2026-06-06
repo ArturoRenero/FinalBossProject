@@ -116,8 +116,18 @@ type
 
     FDiceIsRolling: Boolean;
     FPartidaPausada: Boolean;
+    FAplicandoEstadoRemoto: Boolean;
+    FRollIDsProcesados: TStringList;
 
     FBots: array[1..4] of TBotAI; // Memoria para los bots
+
+    function JuegoOcupado: Boolean;
+    function AvatarCellOffset(PlayerID, CellIdx: Integer): TPointF;
+    function NuevoRollID: string;
+    function RollIDYaProcesado(const RollID: string): Boolean;
+    procedure RegistrarRollID(const RollID: string);
+    procedure Bot_OnRollRequested(PlayerID: Integer);
+    procedure EnviarTiradaAutorizada(PlayerID: Integer);
 
     function NetIsHost: Boolean;
     procedure NetSendCommand(const Command: string; JSONData: TJSONObject = nil);
@@ -170,6 +180,10 @@ begin
   try
     FIndex := 0; Randomize;
     FPartidaPausada := False;
+    FAplicandoEstadoRemoto := False;
+    FRollIDsProcesados := TStringList.Create;
+    FRollIDsProcesados.Sorted := True;
+    FRollIDsProcesados.Duplicates := dupIgnore;
 
     RutaDB := GetDBPath;
     ForceDirectories(ExtractFilePath(RutaDB));
@@ -247,7 +261,8 @@ procedure TfrmMain.FormDestroy(Sender: TObject);
 var i: Integer;
 begin
   for i := 1 to 4 do
-    if Assigned(FBots[i]) then FreeAndNil(FBots[i]); // <-- Muerte limpia y segura
+    if Assigned(FBots[i]) then FreeAndNil(FBots[i]); // Limpieza segura de bots
+  FRollIDsProcesados.Free;
   FNetworkManager.Free;
   FBluetoothManager.Free;
   FGameEngine.Free;
@@ -275,6 +290,96 @@ begin
   if FUseBluetooth
   then GetBTManager.BroadcastState(StateJSON)
   else FNetworkManager.BroadcastState(StateJSON);
+end;
+
+function TfrmMain.JuegoOcupado: Boolean;
+begin
+  // El juego está ocupado si el dado se está mostrando o si una ficha sigue caminando.
+  // Este candado bloquea botones y peticiones, pero no bloquea el SYNC_ROLL autorizado.
+  Result := FDiceIsRolling or FTmrWalk.Enabled or (FWalkTargetCell <> -1);
+end;
+
+function TfrmMain.AvatarCellOffset(PlayerID, CellIdx: Integer): TPointF;
+var
+  i, jugadoresEnCasilla: Integer;
+begin
+  Result := TPointF.Create(0, 0);
+
+  // En la salida ya usamos una separación especial más grande.
+  if CellIdx = 0 then
+  begin
+    if (PlayerID >= 1) and (PlayerID <= 4) then
+      Result := AVATAR_START_OFFSET[PlayerID - 1];
+    Exit;
+  end;
+
+  jugadoresEnCasilla := 0;
+  for i := 1 to FGameEngine.TotalPlayers do
+    if FGameEngine.GetPlayerPosition(i) = CellIdx then
+      Inc(jugadoresEnCasilla);
+
+  // Si solo hay una ficha en la casilla, no la movemos de su centro normal.
+  if jugadoresEnCasilla <= 1 then Exit;
+
+  case PlayerID of
+    1: Result := TPointF.Create(-10, -10);
+    2: Result := TPointF.Create( 10, -10);
+    3: Result := TPointF.Create(-10,  10);
+    4: Result := TPointF.Create( 10,  10);
+  end;
+end;
+
+function TfrmMain.NuevoRollID: string;
+var
+  G: TGUID;
+begin
+  CreateGUID(G);
+  Result := GUIDToString(G);
+end;
+
+function TfrmMain.RollIDYaProcesado(const RollID: string): Boolean;
+begin
+  Result := (RollID <> '') and Assigned(FRollIDsProcesados) and
+            (FRollIDsProcesados.IndexOf(RollID) >= 0);
+end;
+
+procedure TfrmMain.RegistrarRollID(const RollID: string);
+begin
+  if (RollID = '') or not Assigned(FRollIDsProcesados) then Exit;
+
+  FRollIDsProcesados.Add(RollID);
+
+  // Evitamos que la lista crezca sin límite durante partidas largas.
+  while FRollIDsProcesados.Count > 80 do
+    FRollIDsProcesados.Delete(0);
+end;
+
+procedure TfrmMain.EnviarTiradaAutorizada(PlayerID: Integer);
+var
+  json: TJSONObject;
+begin
+  if not NetIsHost then Exit;
+  if not FGameEngine.GameActive then Exit;
+  if FPartidaPausada then Exit;
+  if JuegoOcupado then Exit;
+  if FGameEngine.GetCurrentPlayer <> PlayerID then Exit;
+
+  json := TJSONObject.Create;
+  try
+    json.AddPair('player', TJSONNumber.Create(PlayerID));
+    json.AddPair('dice', TJSONNumber.Create(Random(6) + 1));
+    json.AddPair('roll_id', NuevoRollID);
+    NetSendCommand('SYNC_ROLL', json);
+  finally
+    json.Free;
+  end;
+end;
+
+procedure TfrmMain.Bot_OnRollRequested(PlayerID: Integer);
+begin
+  // El bot no mueve el motor directamente. Solo pide al Host una tirada autorizada.
+  // Así LAN y Bluetooth reciben el mismo SYNC_ROLL que un jugador humano.
+  EnviarTiradaAutorizada(PlayerID);
 end;
 
 // ════════════════════════════════════════════════════════════════
@@ -322,7 +427,8 @@ end;
 
 procedure TfrmMain.btnReiniciarClick(Sender: TObject);
 begin
-  if not FGameEngine.GameActive then Exit;
+  // El reinicio debe permitirse aunque la partida ya haya terminado.
+  // Por eso NO debemos poner: if not FGameEngine.GameActive then Exit;
 
   if not NetIsHost then
   begin
@@ -330,12 +436,44 @@ begin
     Exit;
   end;
 
-  TSaveManager.BorrarPartida(FDB);
-  FGameEngine.ResetGame;
-  RestaurarVisualesDesdeMotor;
-  NetBroadcastState(FGameEngine.ExportStateToJSON);
+  // Detener cualquier animación o movimiento pendiente.
+  FDiceIsRolling := False;
+  FWalkTargetCell := -1;
+  FSecondaryTargetCell := -1;
+  FWalkingPlayer := 0;
 
-  ShowMessage('La partida ha sido reiniciada a cero.');
+  if Assigned(FTmrWalk) then
+    FTmrWalk.Enabled := False;
+
+  // Limpiar IDs de tiradas procesadas para que la nueva partida empiece limpia.
+  if Assigned(FRollIDsProcesados) then
+    FRollIDsProcesados.Clear;
+
+  // Quitar pausa si estaba pausada.
+  FPartidaPausada := False;
+
+  // Ocultar mensaje grande de victoria o evento especial.
+  if Assigned(rctnglSpecialEvent) then
+    rctnglSpecialEvent.Visible := False;
+
+  if Assigned(lblEventoEspecial) then
+    lblEventoEspecial.Text := '';
+
+  // Borrar partida guardada.
+  TSaveManager.BorrarPartida(FDB);
+
+  // Reiniciar el motor del juego.
+  FGameEngine.ResetGame;
+
+  // Restaurar fichas y textos visuales.
+  RestaurarVisualesDesdeMotor;
+  ComprobarTurnoActual;
+
+  // Sincronizar con los clientes LAN/Bluetooth.
+  if NetIsHost then
+    NetBroadcastState(FGameEngine.ExportStateToJSON);
+
+  ShowMessage('La partida ha sido reiniciada.');
 end;
 
 
@@ -460,24 +598,15 @@ begin
     img.Scale.Y := 1.0;
     img.RotationAngle := 0;
 
-    if pos = 0 then
-    begin
-       img.Position.X := pt.X + AVATAR_START_OFFSET[i-1].X;
-       img.Position.Y := pt.Y + AVATAR_START_OFFSET[i-1].Y;
-    end
-    else
-    begin
-       img.Position.X := pt.X;
-       img.Position.Y := pt.Y;
-    end;
+    var offset := AvatarCellOffset(i, pos);
+    img.Position.X := pt.X + offset.X;
+    img.Position.Y := pt.Y + offset.Y;
 
     img.Visible := True;
     img.BringToFront;
 
-    // ── ¡LA CURA AL BUG DEL RESETEO! ──
-    // Mantiene el rastreador de animaciones sincronizado con el motor
+    // Mantiene el rastreador de animaciones sincronizado con el motor.
     FVisualPositions[i] := pos;
-    // ──────────────────────────────────
   end;
 
   if FGameEngine.Status = gsPaused then
@@ -530,7 +659,7 @@ begin
     FBoardManager.FinishCapture;
     ShowMessage('¡Coordenadas guardadas correctamente!');
 
-    // ── ¡NUEVO! BROADCAST DE COORDENADAS POR RED ──
+    // Sincronización de coordenadas por red.
     if NetIsHost
     then
       begin
@@ -550,11 +679,11 @@ begin
           end;
 
         jsonCoords.AddPair('coords', arr);
-        NetBroadcastState(jsonCoords.ToJSON); // Usamos BroadcastState para mandarlo a todos
-        NetSendCommand('SYNC_COORDS', jsonCoords); // Y el comando oficial
+        // Las coordenadas no son un estado de partida. Se mandan con su propio comando.
+        NetSendCommand('SYNC_COORDS', jsonCoords);
         jsonCoords.Free;
       end;
-    // ──────────────────────────────────────────────
+    // Fin de sincronización de coordenadas.
 
     // HOT-RELOADING: Restaura el juego en caliente localmente
     if FGameEngine.GameActive
@@ -832,12 +961,16 @@ begin
 end;
 
 procedure TfrmMain.MoveAvatarToCell(PlayerID, CellIdx: Integer);
-var pt: TPointF; img: TImage;
+var
+  pt, offset: TPointF;
+  img: TImage;
 begin
   pt  := FBoardManager.GetCellPosition(CellIdx, imgBoard.Width, imgBoard.Height);
+  offset := AvatarCellOffset(PlayerID, CellIdx);
   img := GetAvatarImage(PlayerID);
 
-  img.Position.X := pt.X; img.Position.Y := pt.Y;
+  img.Position.X := pt.X + offset.X;
+  img.Position.Y := pt.Y + offset.Y;
   img.Opacity := 1.0; img.Scale.X := 1.0; img.Scale.Y := 1.0;
   img.RotationAngle := 0; img.Visible := True; img.BringToFront;
 end;
@@ -962,26 +1095,31 @@ begin
 end;
 
 procedure TfrmMain.btnTirarDadoClick(Sender: TObject);
-var json: TJSONObject;
+var
+  json: TJSONObject;
 begin
   if not FGameEngine.GameActive then Exit;
+  if FPartidaPausada then Exit;
+  if JuegoOcupado then Exit;
+  if FGameEngine.GetCurrentPlayer <> FLocalPlayerID then Exit;
 
   btnTirarDado.Enabled := False;
 
-  // ── ¡NUEVO! CIERRA EL ESCUDO AL INSTANTE ──
-  FDiceIsRolling := True;
-  // ──────────────────────────────────────────
-
   if NetIsHost then
   begin
-    json := TJSONObject.Create;
-    json.AddPair('player', TJSONNumber.Create(FGameEngine.GetCurrentPlayer));
-    json.AddPair('dice', TJSONNumber.Create(Random(6) + 1));
-    NetSendCommand('SYNC_ROLL', json);
-    json.Free;
+    EnviarTiradaAutorizada(FLocalPlayerID);
   end
   else
-    NetSendCommand('ROLL_REQUEST');
+  begin
+    // El cliente solo solicita tirar. El Host valida si realmente es su turno.
+    json := TJSONObject.Create;
+    try
+      json.AddPair('player', TJSONNumber.Create(FLocalPlayerID));
+      NetSendCommand('ROLL_REQUEST', json);
+    finally
+      json.Free;
+    end;
+  end;
 end;
 
 procedure TfrmMain.tmrWalkTimer(Sender: TObject);
@@ -1033,14 +1171,15 @@ begin
 
   FVisualPositions[FWalkingPlayer] := FVisualPositions[FWalkingPlayer] + step;
   pt := FBoardManager.GetCellPosition(FVisualPositions[FWalkingPlayer], imgBoard.Width, imgBoard.Height);
+  var offset := AvatarCellOffset(FWalkingPlayer, FVisualPositions[FWalkingPlayer]);
+  pt.X := pt.X + offset.X;
+  pt.Y := pt.Y + offset.Y;
 
   var img := GetAvatarImage(FWalkingPlayer);
 
-  // ── ¡LA CURA AL VUELO HACIA LA ESQUINA (0,0)! ──
-  // Detiene forzosamente cualquier animación zombi antes de inyectar la nueva
+  // Detiene animaciones anteriores para evitar saltos hacia la esquina del tablero.
   TAnimator.StopPropertyAnimation(img, 'Position.X');
   TAnimator.StopPropertyAnimation(img, 'Position.Y');
-  // ───────────────────────────────────────────────
 
   TAnimator.AnimateFloat(img, 'Position.X', pt.X, 0.2);
   TAnimator.AnimateFloat(img, 'Position.Y', pt.Y, 0.2);
@@ -1179,25 +1318,31 @@ begin
       lblTurno.Text := Format('El Bot %d está pensando...', [NewPlayerID]);
   end;
 
-  // ── ¡LA CURA A LA CONDICIÓN DE CARRERA! ──
-  // Solo pasamos la batuta si el tablero está en absoluta calma y sin dados rodando
-  if not FDiceIsRolling and not FTmrWalk.Enabled then
+  // Solo revisamos el turno cuando no se está aplicando un estado remoto ni hay animaciones activas.
+  if (not FAplicandoEstadoRemoto) and (not JuegoOcupado) then
     ComprobarTurnoActual;
 end;
 
 procedure TfrmMain.GE_OnGameOver(WinnerID: Integer);
 begin
-  lblTurno.Text := Format('🏆 ¡Jugador %d ganó!', [WinnerID]);
-  lblDado.Text  := '— Partida terminada —';
+  lblTurno.Text := Format('GANADOR: JUGADOR %d', [WinnerID]);
+  lblDado.Text  := 'Partida terminada';
+  btnTirarDado.Enabled := False;
 
-  TThread.CreateAnonymousThread(procedure
-    begin
-      Sleep(2000);
-      TThread.Queue(TThread(nil), procedure
-        begin
-          ShowMessage(Format('¡Felicidades! ¡El Jugador %d ganó la partida!', [WinnerID]));
-        end);
-    end).Start;
+  // Aviso grande dentro del tablero para que no se pierda durante la presentación.
+  if Assigned(rctnglSpecialEvent) and Assigned(lblEventoEspecial) then
+  begin
+    lblEventoEspecial.Text := Format('JUGADOR %d GANO LA PARTIDA', [WinnerID]);
+    lblEventoEspecial.Font.Size := 22;
+    lblEventoEspecial.TextSettings.FontColor := TAlphaColorRec.Black;
+    rctnglSpecialEvent.Fill.Color := TAlphaColorRec.Gold;
+    rctnglSpecialEvent.Opacity := 1.0;
+    rctnglSpecialEvent.Visible := True;
+    rctnglSpecialEvent.BringToFront;
+    lblEventoEspecial.BringToFront;
+  end;
+
+  ShowMessage(Format('Felicidades. El Jugador %d gano la partida.', [WinnerID]));
 end;
 
 procedure TfrmMain.Net_OnMessageReceived(const Command: string; JSONData: TJSONObject);
@@ -1248,15 +1393,29 @@ begin
       begin
         if Assigned(JSONData) then
         begin
-          FGameEngine.ImportStateFromJSON(JSONData.ToJSON);
-          RestaurarVisualesDesdeMotor;
+          // STATE solo corrige datos. No debe disparar animaciones mientras llega por red.
+          FAplicandoEstadoRemoto := True;
+          FGameEngine.OnPlayerMoved := nil;
+          FGameEngine.OnTurnChanged := nil;
+          try
+            FGameEngine.ImportStateFromJSON(JSONData.ToJSON);
+          finally
+            FGameEngine.OnPlayerMoved := GE_OnPlayerMoved;
+            FGameEngine.OnTurnChanged := GE_OnTurnChanged;
+            FAplicandoEstadoRemoto := False;
+          end;
+
+          // Si el tablero está quieto, sí podemos redibujar todo.
+          // Si está animando, no tocamos posiciones visuales para evitar saltos o regresos al inicio.
+          if not JuegoOcupado then
+            RestaurarVisualesDesdeMotor
+          else
+            GE_OnTurnChanged(FGameEngine.GetCurrentPlayer);
 
           if (not NetIsHost) and (FLocalPlayerID > 0) and (FGameEngine.PlayerAvatars[FLocalPlayerID] = 0) then
           begin
              SeleccionarAvatar(FLocalPlayerID, FPlayerName, nil);
           end;
-
-          if not FGameEngine.GameActive then FGameEngine.StartGame;
         end;
       end;
 
@@ -1266,6 +1425,16 @@ begin
         begin
           var pID := JSONData.GetValue<Integer>('player');
           var dVal := JSONData.GetValue<Integer>('dice');
+          var rollID := '';
+
+          JSONData.TryGetValue<string>('roll_id', rollID);
+
+          // Si LAN o Bluetooth entrega el mismo mensaje dos veces, no repetimos la jugada.
+          if RollIDYaProcesado(rollID) then Exit;
+          RegistrarRollID(rollID);
+
+          // SYNC_ROLL es el único mensaje que debe tirar y animar.
+          // No mandamos STATE inmediatamente después, porque eso corta la animación.
           FGameEngine.TryRollDice(pID, dVal);
         end;
       end;
@@ -1274,11 +1443,13 @@ begin
       begin
         if NetIsHost then
         begin
-          json := TJSONObject.Create;
-          json.AddPair('player', TJSONNumber.Create(FGameEngine.GetCurrentPlayer));
-          json.AddPair('dice', TJSONNumber.Create(Random(6) + 1));
-          NetSendCommand('SYNC_ROLL', json);
-          json.Free;
+          var requestedPlayer := FGameEngine.GetCurrentPlayer;
+
+          if Assigned(JSONData) then
+            JSONData.TryGetValue<Integer>('player', requestedPlayer);
+
+          // El Host valida el turno. Esto evita tiros atrasados o doble clics por red.
+          EnviarTiradaAutorizada(requestedPlayer);
         end;
       end;
 
@@ -1311,7 +1482,7 @@ begin
           NetBroadcastState(FGameEngine.ExportStateToJSON);
       end;
 
-    7: // ── SYNC_COORDS (EL PARCHE EN CALIENTE) ──
+    7: // ── SYNC_COORDS ──
       begin
         if Assigned(JSONData) then
         begin
@@ -1360,6 +1531,8 @@ procedure TfrmMain.ComprobarTurnoActual;
 begin
   if not FGameEngine.GameActive then Exit;
   if FPartidaPausada then Exit;
+  if FAplicandoEstadoRemoto then Exit;
+  if JuegoOcupado then Exit;
 
   if FGameEngine.GetCurrentPlayer = FLocalPlayerID then
   begin
@@ -1367,7 +1540,8 @@ begin
   end
   else if NetIsHost and Assigned(FBots[FGameEngine.GetCurrentPlayer]) then
   begin
-    // Si es el turno de un bot y soy el Host, apago el botón y mando al bot a pensar
+    // Si es turno de un bot, solo el Host lo despierta.
+    // El bot pedirá una tirada autorizada; no moverá el motor directamente.
     btnTirarDado.Enabled := False;
     FBots[FGameEngine.GetCurrentPlayer].JugarTurno;
   end;
@@ -1382,11 +1556,15 @@ begin
 
   for i := 1 to FTotalPlayers do
   begin
-    // Si el jugador no soy yo y no tiene avatar, es un asiento vacío
-    if (i <> FLocalPlayerID) and (FGameEngine.PlayerAvatars[i] = 0) then
+    // Solo rellenamos asientos que el Host no ha asignado a un jugador humano.
+    // Esto evita reemplazar clientes que ya entraron pero todavía no eligen avatar.
+    if (i <> FLocalPlayerID) and (i >= FNextPlayerID) and (FGameEngine.PlayerAvatars[i] = 0) then
     begin
       if not Assigned(FBots[i]) then
+      begin
         FBots[i] := TBotAI.Create(i, FGameEngine);
+        FBots[i].OnRollRequested := Bot_OnRollRequested;
+      end;
 
       // El bot elige avatar en secreto
       FBots[i].AsignarAvatarAleatorio;
