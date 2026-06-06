@@ -149,99 +149,113 @@ var
   rule: TRuleResult;
 begin
   Result := False;
+
+  // Estado general
   if not FGameActive then Exit;
+  if FStatus <> gsPlaying then Exit;
+
+  // Turno correcto
   if not FTurnManager.IsPlayerTurn(PlayerID) then Exit;
 
   Result := True;
-  pIdx   := PlayerID - 1;
+  pIdx := PlayerID - 1;
 
-  // 1. Tirar dado. Si viene por red, ForcedDice asegura que todos usen el mismo valor.
-  if ForcedDice > 0 then
-    diceVal := ForcedDice
-  else
-    diceVal := RollDiceValue;
+  // Dado
+  if ForcedDice > 0
+  then diceVal := ForcedDice
+  else diceVal := RollDiceValue;
 
   if Assigned(FOnDiceRolled)
   then FOnDiceRolled(PlayerID, diceVal);
 
-  // 2. Movimiento
   newPos := FPlayerPositions[pIdx] + diceVal;
 
-  // ── LÓGICA DE REBOTE EXACTO A LA META ──
+  // Rebote exacto
   if newPos > WINNING_CELL then
   begin
-    // Calculamos cuánto nos pasamos. Ej: Meta es 63, tiramos desde la 61 un 4.
-    // newPos = 65. Exceso = 2.
-    // Nueva Posición Real = 63 - 2 = 61. ¡El jugador rebota!
     excess := newPos - WINNING_CELL;
     newPos := WINNING_CELL - excess;
 
-    // Le avisamos a la UI que muestre una alerta visual del rebote
     if Assigned(FOnRuleTriggered) then
-      FOnRuleTriggered(PlayerID, 'BOUNCE', Format('¡Te pasaste por %d! Rebotas hacia atrás.', [excess]));
+      FOnRuleTriggered(
+        PlayerID,
+        'BOUNCE',
+        Format('¡Te pasaste por %d! Rebotas hacia atrás.', [excess])
+      );
   end;
 
-  // -- SISTEMA DE RESCATE DEL POZO --
+  // Rescate del pozo
   if newPos = 31 then
   begin
     for i := 0 to FTotalPlayers - 1 do
-      if (i <> pIdx) and (FPlayerPositions[i] = 31) then
-        FPlayerBlockedTurns[i] := 0;
+      if (i <> pIdx) and (FPlayerPositions[i] = 31)
+      then FPlayerBlockedTurns[i] := 0;
   end;
 
   FPlayerPositions[pIdx] := newPos;
-  if Assigned(FOnPlayerMoved) then FOnPlayerMoved(PlayerID, newPos);
 
-  // 3. Evaluar Reglas (Puede que el rebote te haga caer en una Oca o Laberinto)
+  if Assigned(FOnPlayerMoved)
+  then FOnPlayerMoved(PlayerID, newPos);
+
+  // Regla especial
   rule := TRulesEngine.EvaluateCell(FBoardIndex, newPos);
 
-  if rule.Message <> '' then
+  if rule.RollAgain then
   begin
-    if Assigned(FOnRuleTriggered) then
-      FOnRuleTriggered(PlayerID, rule.RuleType, rule.Message);
+    if Assigned(FOnTurnChanged) then
+      FOnTurnChanged(FTurnManager.CurrentPlayer);
   end;
 
-  // Si hay teletransporte
+  if rule.Message <> '' then
+    if Assigned(FOnRuleTriggered)
+    then FOnRuleTriggered(PlayerID, rule.RuleType, rule.Message);
+
   if rule.NewCell <> -1 then
   begin
     FPlayerPositions[pIdx] := rule.NewCell;
     newPos := rule.NewCell;
-    if Assigned(FOnPlayerMoved) then FOnPlayerMoved(PlayerID, newPos);
+
+    if Assigned(FOnPlayerMoved)
+    then FOnPlayerMoved(PlayerID, newPos);
   end;
 
-  // Si la regla indica perder turnos
-  if rule.TurnsToSkip > 0 then
-    FPlayerBlockedTurns[pIdx] := rule.TurnsToSkip;
+  if rule.TurnsToSkip > 0
+  then FPlayerBlockedTurns[pIdx] := rule.TurnsToSkip;
 
-  // ── VERIFICAR VICTORIA EXACTA ──
+  // Victoria
   if newPos = WINNING_CELL then
   begin
-    FGameActive := False; // Bloquea los dados
-    if Assigned(FOnGameOver) then FOnGameOver(PlayerID);
-    Exit;
+    FGameActive := False;
+
+    if Assigned(FOnGameOver) then
+      FOnGameOver(PlayerID);
+
+    Exit(True);
   end;
 
-  // 4. PASAR TURNO (Bucle Inteligente)
+  // Cambio de turno
   if not rule.RollAgain then
   begin
     loops := 0;
+
     repeat
       FTurnManager.AdvanceTurn;
+
       pIdx := FTurnManager.CurrentPlayer - 1;
 
       if FPlayerBlockedTurns[pIdx] > 0 then
-      begin
-         FPlayerBlockedTurns[pIdx] := FPlayerBlockedTurns[pIdx] - 1;
-      end
+        Dec(FPlayerBlockedTurns[pIdx])
       else
-         Break;
+        Break;
 
       Inc(loops);
     until loops >= FTotalPlayers;
   end;
 
-  if Assigned(FOnTurnChanged) then
-    FOnTurnChanged(FTurnManager.CurrentPlayer);
+  if Assigned(FOnTurnChanged)
+  then FOnTurnChanged(FTurnManager.CurrentPlayer);
+
+  Result := True;
 end; // TryRollDice()
 
 function TGameEngine.ExportStateToJSON: string;
