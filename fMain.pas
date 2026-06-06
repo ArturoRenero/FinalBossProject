@@ -63,7 +63,6 @@ type
     lblCasilla: TLabel;
     stat1: TStatusBar;
     lblCoords: TLabel;
-    mmo1: TMemo;
 
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -502,21 +501,6 @@ begin
   NetBroadcastState(FGameEngine.ExportStateToJSON); // ¡Avisa a los clientes!
   RestaurarVisualesDesdeMotor;
 end;
-
-// TODO: remover la siguiente funcion
-//procedure TfrmMain.btnReanudarClick(Sender: TObject);
-//begin
-//  if not FGameEngine.GameActive then Exit;
-//
-//  FPartidaPausada := False;
-//
-//  // Intercambio visual de los botones
-//  if Assigned(btnReanudar) then btnReanudar.Visible := False;
-//  if Assigned(btnPausar) then btnPausar.Visible := True;
-//
-//  // Restaura visualmente de quién era el turno y rehabilita el dado si es necesario
-//  GE_OnTurnChanged(FGameEngine.GetCurrentPlayer);
-//end;
 
 procedure TfrmMain.btnMenuPrincipalClick(Sender: TObject);
 begin
@@ -1296,12 +1280,6 @@ begin
     FSecondaryTargetCell := -1;
     if not FDiceIsRolling
     then FTmrWalk.Enabled := True;
-      mmo1.Lines.Add( // TODO: Remover este bloque
-        Format(
-          'Turn=%d NewCell=%d',
-          [PlayerID, NewCellIdx]
-          )
-      );
   end;
 end;
 
@@ -1341,21 +1319,6 @@ begin
   // Solo revisamos el turno cuando no se está aplicando un estado remoto ni hay animaciones activas.
   if (not FAplicandoEstadoRemoto) and (not JuegoOcupado)
   then ComprobarTurnoActual;
-
-  if (NetIsHost) // TODO: Remover este bloque
-  then mmo1.Lines.Add(
-    Format(
-      'HOST' + sLineBreak + 'NewPlayerID=%d',
-      [NewPlayerID]
-      )
-  )
-  else
-  mmo1.Lines.Add( // TODO: Remover este bloque
-    Format(
-      'CLIENTE' + sLineBreak + 'NewPlayerID=%d',
-      [NewPlayerID]
-      )
-  );
 end;
 
 procedure TfrmMain.GE_OnGameOver(WinnerID: Integer);
