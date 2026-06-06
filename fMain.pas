@@ -26,7 +26,7 @@ uses
   uBluetoothManager,
   fAdminLogin,
   uSaveManager,
-  uBotAI;
+  uBotAI, FMX.Memo.Types, FMX.ScrollBox, FMX.Memo;
 
 type
   TfrmMain = class(TForm)
@@ -63,6 +63,7 @@ type
     lblCasilla: TLabel;
     stat1: TStatusBar;
     lblCoords: TLabel;
+    mmo1: TMemo;
 
     procedure FormCreate(Sender: TObject);
     procedure FormDestroy(Sender: TObject);
@@ -1271,6 +1272,12 @@ begin
   frmDice.OnClose := OnDiceFormClose;
   frmDice.Show;
   lblDado.Text := Format('J%d tiró: %d', [PlayerID, DiceValue]);
+//  mmo1.Lines.Add( // TODO: Remover este bloque
+//    Format(
+//      'Turn=%d Dice=%d',
+//      [PlayerID, DiceValue]
+//      )
+//  );
 end;
 
 procedure TfrmMain.GE_OnPlayerMoved(PlayerID, NewCellIdx: Integer);
@@ -1280,14 +1287,21 @@ begin
   img.Opacity := 1.0; img.Scale.X := 1.0; img.Scale.Y := 1.0;
   img.RotationAngle := 0; img.Visible := True; img.BringToFront;
 
-  if FWalkTargetCell <> -1 then
-    FSecondaryTargetCell := NewCellIdx
+  if FWalkTargetCell <> -1
+  then FSecondaryTargetCell := NewCellIdx
   else
   begin
     FWalkingPlayer := PlayerID;
     FWalkTargetCell := NewCellIdx;
     FSecondaryTargetCell := -1;
-    if not FDiceIsRolling then FTmrWalk.Enabled := True;
+    if not FDiceIsRolling
+    then FTmrWalk.Enabled := True;
+      mmo1.Lines.Add( // TODO: Remover este bloque
+        Format(
+          'Turn=%d NewCell=%d',
+          [PlayerID, NewCellIdx]
+          )
+      );
   end;
 end;
 
@@ -1296,6 +1310,12 @@ begin
   FPendingRulePlayer := PlayerID;
   FPendingRuleType := RuleType;
   FPendingRuleMessage := Message;
+//  mmo1.Lines.Add( // TODO: Remover este bloque
+//    Format(
+//      'PlayerID=%d RuleType=%s Message=%s',
+//      [PlayerID, string(RuleType), Message]
+//    )
+//  );
 end;
 
 procedure TfrmMain.GE_OnTurnChanged(NewPlayerID: Integer);
@@ -1319,8 +1339,23 @@ begin
   end;
 
   // Solo revisamos el turno cuando no se está aplicando un estado remoto ni hay animaciones activas.
-  if (not FAplicandoEstadoRemoto) and (not JuegoOcupado) then
-    ComprobarTurnoActual;
+  if (not FAplicandoEstadoRemoto) and (not JuegoOcupado)
+  then ComprobarTurnoActual;
+
+  if (NetIsHost) // TODO: Remover este bloque
+  then mmo1.Lines.Add(
+    Format(
+      'HOST' + sLineBreak + 'NewPlayerID=%d',
+      [NewPlayerID]
+      )
+  )
+  else
+  mmo1.Lines.Add( // TODO: Remover este bloque
+    Format(
+      'CLIENTE' + sLineBreak + 'NewPlayerID=%d',
+      [NewPlayerID]
+      )
+  );
 end;
 
 procedure TfrmMain.GE_OnGameOver(WinnerID: Integer);
@@ -1399,6 +1434,10 @@ begin
           FGameEngine.OnTurnChanged := nil;
           try
             FGameEngine.ImportStateFromJSON(JSONData.ToJSON);
+
+            RestaurarVisualesDesdeMotor;
+            ComprobarTurnoActual;
+
           finally
             FGameEngine.OnPlayerMoved := GE_OnPlayerMoved;
             FGameEngine.OnTurnChanged := GE_OnTurnChanged;
@@ -1419,23 +1458,14 @@ begin
         end;
       end;
 
-    3: // ── SYNC_ROLL ──
+    3: // SYNC_ROLL
       begin
         if Assigned(JSONData) then
         begin
-          var pID := JSONData.GetValue<Integer>('player');
-          var dVal := JSONData.GetValue<Integer>('dice');
-          var rollID := '';
+          var RollPlayer := JSONData.GetValue<Integer>('player');
+          var RollDice   := JSONData.GetValue<Integer>('dice');
 
-          JSONData.TryGetValue<string>('roll_id', rollID);
-
-          // Si LAN o Bluetooth entrega el mismo mensaje dos veces, no repetimos la jugada.
-          if RollIDYaProcesado(rollID) then Exit;
-          RegistrarRollID(rollID);
-
-          // SYNC_ROLL es el único mensaje que debe tirar y animar.
-          // No mandamos STATE inmediatamente después, porque eso corta la animación.
-          FGameEngine.TryRollDice(pID, dVal);
+          FGameEngine.TryRollDice(RollPlayer, RollDice);
         end;
       end;
 
@@ -1529,6 +1559,12 @@ end;
 // ════════════════════════════════════════════════════════════════
 procedure TfrmMain.ComprobarTurnoActual;
 begin
+//  mmo1.Lines.Add( // TODO: remover este bloque
+//    Format(
+//      'ComprobarTurnoActual -> Turno=%d Local=%d',
+//      [FGameEngine.GetCurrentPlayer, FLocalPlayerID]
+//    )
+//  );
   if not FGameEngine.GameActive then Exit;
   if FPartidaPausada then Exit;
   if FAplicandoEstadoRemoto then Exit;

@@ -30,7 +30,7 @@ begin
     // para que lea directamente la carpeta 'data' de tu proyecto original.
 
     // ↓↓↓ CAMBIA ESTA RUTA POR LA RUTA REAL DE TU CARPETA ↓↓↓
-    Result := 'C:\Users\Cabre\OneDrive\Documentos\Embarcadero\Studio\Projects\LaOca\FinalBossProject\data\goose.db';
+    Result := 'P:\DelphiStuff\FinalBossProject\data\goose.db';
 
     // ══════════════════════════════════════════════════════════════════════
     // MODO PRODUCCIÓN (Para cuando le pases el juego a tus amigos):

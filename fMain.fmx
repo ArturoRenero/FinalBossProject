@@ -25,7 +25,7 @@ object frmMain: TfrmMain
         item
         end>
       Align = Client
-      Size.Width = 607.000000000000000000
+      Size.Width = 534.000000000000000000
       Size.Height = 478.000000000000000000
       Size.PlatformDefault = False
       WrapMode = Stretch
@@ -53945,6 +53945,17 @@ object frmMain: TfrmMain
       Size.Height = 478.000000000000000000
       Size.PlatformDefault = False
       Visible = False
+    end
+    object mmo1: TMemo
+      Touch.InteractiveGestures = [Pan, LongTap, DoubleTap]
+      DataDetectorTypes = []
+      Align = Left
+      Size.Width = 73.000000000000000000
+      Size.Height = 478.000000000000000000
+      Size.PlatformDefault = False
+      TabOrder = 0
+      Viewport.Width = 69.000000000000000000
+      Viewport.Height = 474.000000000000000000
     end
   end
   object lytButtons: TLayout
